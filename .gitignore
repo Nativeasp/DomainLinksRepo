@@ -1,0 +1,50 @@
+# Legacy/reference projects
+DomainLinksAI/
+rag-chroma-gunicorn/
+.codex/
+chats/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# .NET build output
+bin/
+obj/
+**/bin/
+**/obj/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Local configuration and secrets
+.env
+*.local
+*.secret
+secrets/
+
+# Runtime data
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+chroma_store/
+domain_stores/
+domain_archives/
+
+# OS noise
+Thumbs.db
+Desktop.ini
+.DS_Store
