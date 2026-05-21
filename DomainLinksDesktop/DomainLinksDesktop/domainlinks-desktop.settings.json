@@ -1,0 +1,4 @@
+{
+  "BackendBaseUrl": "http://127.0.0.1:5056",
+  "OllamaBaseUrl": "http://10.211.55.2:11434"
+}

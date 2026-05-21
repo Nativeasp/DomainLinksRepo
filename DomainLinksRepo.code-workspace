@@ -2,15 +2,6 @@
 	"folders": [
 		{
 			"path": "."
-		},
-		{
-			"path": "V:/rag-chroma-gunicorn"
-		},
-		{
-			"path": "DomainLinksDesktop"
-		},
-		{
-			"path": "DomainLinksBackend"
 		}
 	],
 	"settings": {
