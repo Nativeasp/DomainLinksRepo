@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from .config import Settings
-from .db import fetch_all, get_connection
+from .db import fetch_all, fetch_one, get_connection
 
 
 def list_domains(settings: Settings) -> list[dict[str, object]]:
@@ -473,10 +473,320 @@ def get_recent_context_units(
     return [_normalize_row(row) for row in rows]
 
 
+def upsert_app_user(
+    settings: Settings,
+    windows_user_name: str,
+    windows_sid: str | None = None,
+    display_name: str | None = None,
+) -> dict[str, object]:
+    normalized_user_name = windows_user_name.strip()
+    normalized_sid = windows_sid.strip() if windows_sid else None
+    normalized_display_name = display_name.strip() if display_name else None
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        if normalized_sid:
+            cursor.execute(
+                """
+                SELECT TOP 1 AppUserId
+                FROM dbo.AppUsers
+                WHERE WindowsSid = ?
+                """,
+                [normalized_sid],
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                cursor.execute(
+                    """
+                    UPDATE dbo.AppUsers
+                    SET
+                        WindowsUserName = ?,
+                        DisplayName = COALESCE(?, DisplayName),
+                        LastSeenAtUtc = SYSUTCDATETIME(),
+                        UpdatedAtUtc = SYSUTCDATETIME()
+                    WHERE AppUserId = ?
+                    """,
+                    [normalized_user_name, normalized_display_name, row.AppUserId],
+                )
+                conn.commit()
+                return get_app_user(settings, app_user_id=str(row.AppUserId)) or {}
+
+        cursor.execute(
+            """
+            SELECT TOP 1 AppUserId
+            FROM dbo.AppUsers
+            WHERE IdentityProvider = 'Windows' AND WindowsUserName = ?
+            """,
+            [normalized_user_name],
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            cursor.execute(
+                """
+                UPDATE dbo.AppUsers
+                SET
+                    WindowsSid = COALESCE(WindowsSid, ?),
+                    DisplayName = COALESCE(?, DisplayName),
+                    LastSeenAtUtc = SYSUTCDATETIME(),
+                    UpdatedAtUtc = SYSUTCDATETIME()
+                WHERE AppUserId = ?
+                """,
+                [normalized_sid, normalized_display_name, row.AppUserId],
+            )
+            conn.commit()
+            return get_app_user(settings, app_user_id=str(row.AppUserId)) or {}
+
+        cursor.execute(
+            """
+            INSERT INTO dbo.AppUsers (
+                WindowsUserName,
+                WindowsSid,
+                DisplayName
+            )
+            VALUES (?, ?, ?)
+            """,
+            [normalized_user_name, normalized_sid, normalized_display_name],
+        )
+        conn.commit()
+
+    return get_app_user(settings, windows_sid=normalized_sid, windows_user_name=normalized_user_name) or {}
+
+
+def get_app_user(
+    settings: Settings,
+    *,
+    app_user_id: str | None = None,
+    windows_sid: str | None = None,
+    windows_user_name: str | None = None,
+) -> dict[str, object] | None:
+    if app_user_id:
+        row = fetch_one(
+            settings,
+            """
+            SELECT
+                AppUserId,
+                IdentityProvider,
+                WindowsUserName,
+                WindowsSid,
+                DisplayName,
+                Status,
+                FirstSeenAtUtc,
+                LastSeenAtUtc,
+                CreatedAtUtc,
+                UpdatedAtUtc
+            FROM dbo.AppUsers
+            WHERE AppUserId = ?
+            """,
+            [app_user_id],
+        )
+        return _normalize_row(row) if row else None
+
+    params: list[object] = []
+    where_clause = []
+    if windows_sid:
+        where_clause.append("WindowsSid = ?")
+        params.append(windows_sid)
+    if windows_user_name:
+        where_clause.append("WindowsUserName = ?")
+        params.append(windows_user_name)
+    if not where_clause:
+        return None
+
+    row = fetch_one(
+        settings,
+        f"""
+        SELECT TOP 1
+            AppUserId,
+            IdentityProvider,
+            WindowsUserName,
+            WindowsSid,
+            DisplayName,
+            Status,
+            FirstSeenAtUtc,
+            LastSeenAtUtc,
+            CreatedAtUtc,
+            UpdatedAtUtc
+        FROM dbo.AppUsers
+        WHERE {' OR '.join(where_clause)}
+        ORDER BY CreatedAtUtc DESC
+        """,
+        params,
+    )
+    return _normalize_row(row) if row else None
+
+
+def has_user_chat_backup_files(settings: Settings, app_user_id: str) -> bool:
+    row = fetch_one(
+        settings,
+        """
+        SELECT TOP 1 1 AS HasBackups
+        FROM dbo.UserChatBackupFiles
+        WHERE AppUserId = ? AND IsDeleted = 0
+        """,
+        [app_user_id],
+    )
+    return row is not None
+
+
+def list_user_chat_backup_files(
+    settings: Settings,
+    app_user_id: str,
+    *,
+    include_payload: bool,
+) -> list[dict[str, object]]:
+    payload_clause = "FileContentCompressedEncrypted," if include_payload else "CAST(NULL AS VARBINARY(MAX)) AS FileContentCompressedEncrypted,"
+    rows = fetch_all(
+        settings,
+        f"""
+        SELECT
+            UserChatBackupFileId,
+            AppUserId,
+            RootCollectionCode,
+            RootDisplayName,
+            FileName,
+            {payload_clause}
+            ContentHashSha256,
+            CompressionType,
+            EncryptionType,
+            KeyVersion,
+            ClientModifiedUtc,
+            BackupCreatedUtc,
+            BackupUpdatedUtc,
+            LastRestoredUtc,
+            ClientMachineName,
+            AppVersion,
+            IsDeleted
+        FROM dbo.UserChatBackupFiles
+        WHERE AppUserId = ? AND IsDeleted = 0
+        ORDER BY RootDisplayName
+        """,
+        [app_user_id],
+    )
+    return [_normalize_row(row) for row in rows]
+
+
+def upsert_user_chat_backup_file(
+    settings: Settings,
+    *,
+    app_user_id: str,
+    root_collection_code: str,
+    root_display_name: str,
+    file_name: str,
+    payload_bytes: bytes,
+    content_hash_bytes: bytes,
+    compression_type: str,
+    encryption_type: str,
+    key_version: int,
+    client_modified_utc,
+    client_machine_name: str | None,
+    app_version: str | None,
+    is_deleted: bool,
+) -> None:
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT TOP 1 UserChatBackupFileId
+            FROM dbo.UserChatBackupFiles
+            WHERE AppUserId = ? AND RootCollectionCode = ?
+            """,
+            [app_user_id, root_collection_code],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute(
+                """
+                INSERT INTO dbo.UserChatBackupFiles (
+                    AppUserId,
+                    RootCollectionCode,
+                    RootDisplayName,
+                    FileName,
+                    FileContentCompressedEncrypted,
+                    ContentHashSha256,
+                    CompressionType,
+                    EncryptionType,
+                    KeyVersion,
+                    ClientModifiedUtc,
+                    ClientMachineName,
+                    AppVersion,
+                    IsDeleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    app_user_id,
+                    root_collection_code,
+                    root_display_name,
+                    file_name,
+                    payload_bytes,
+                    content_hash_bytes,
+                    compression_type,
+                    encryption_type,
+                    key_version,
+                    client_modified_utc,
+                    client_machine_name,
+                    app_version,
+                    1 if is_deleted else 0,
+                ],
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE dbo.UserChatBackupFiles
+                SET
+                    RootDisplayName = ?,
+                    FileName = ?,
+                    FileContentCompressedEncrypted = ?,
+                    ContentHashSha256 = ?,
+                    CompressionType = ?,
+                    EncryptionType = ?,
+                    KeyVersion = ?,
+                    ClientModifiedUtc = ?,
+                    BackupUpdatedUtc = SYSUTCDATETIME(),
+                    ClientMachineName = ?,
+                    AppVersion = ?,
+                    IsDeleted = ?
+                WHERE UserChatBackupFileId = ?
+                """,
+                [
+                    root_display_name,
+                    file_name,
+                    payload_bytes,
+                    content_hash_bytes,
+                    compression_type,
+                    encryption_type,
+                    key_version,
+                    client_modified_utc,
+                    client_machine_name,
+                    app_version,
+                    1 if is_deleted else 0,
+                    row.UserChatBackupFileId,
+                ],
+            )
+        conn.commit()
+
+
+def mark_user_chat_backup_files_restored(
+    settings: Settings,
+    app_user_id: str,
+) -> None:
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE dbo.UserChatBackupFiles
+            SET LastRestoredUtc = SYSUTCDATETIME()
+            WHERE AppUserId = ? AND IsDeleted = 0
+            """,
+            [app_user_id],
+        )
+        conn.commit()
+
+
 def _normalize_row(row: dict[str, object]) -> dict[str, object]:
     normalized: dict[str, object] = {}
     for key, value in row.items():
-        normalized[key] = str(value) if hasattr(value, "hex") else value
+        normalized[key] = str(value) if hasattr(value, "hex") and not isinstance(value, (bytes, bytearray, memoryview)) else value
     return normalized
 
 

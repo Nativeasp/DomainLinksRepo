@@ -46,6 +46,22 @@ def fetch_all(
         return [dict(zip(columns, row, strict=False)) for row in rows]
 
 
+def fetch_one(
+    settings: Settings,
+    query: str,
+    params: Sequence[object] | None = None,
+) -> dict[str, object] | None:
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params or [])
+        row = cursor.fetchone()
+        if row is None:
+            return None
+
+        columns = [column[0] for column in cursor.description]
+        return dict(zip(columns, row, strict=False))
+
+
 def ping_database(settings: Settings) -> Mapping[str, object]:
     with get_connection(settings) as conn:
         cursor = conn.cursor()

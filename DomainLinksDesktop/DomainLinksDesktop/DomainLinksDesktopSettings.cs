@@ -14,6 +14,7 @@ internal sealed class DomainLinksDesktopSettings
     public double LeftPaneWidth { get; init; } = 280;
     public double RightPaneWidth { get; init; } = 320;
     public double PromptPaneHeight { get; init; } = 160;
+    public string LastSelectedModel { get; init; } = string.Empty;
 
     public static DomainLinksDesktopSettings Load()
     {
@@ -43,6 +44,7 @@ internal sealed class DomainLinksDesktopSettings
                 LeftPaneWidth = settings.LeftPaneWidth > 0 ? settings.LeftPaneWidth : 280,
                 RightPaneWidth = settings.RightPaneWidth > 0 ? settings.RightPaneWidth : 320,
                 PromptPaneHeight = settings.PromptPaneHeight > 0 ? settings.PromptPaneHeight : 160,
+                LastSelectedModel = settings.LastSelectedModel ?? string.Empty,
             };
         }
         catch

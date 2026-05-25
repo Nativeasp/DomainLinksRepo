@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:DomainLinksDesktop"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         xmlns:sys="clr-namespace:System;assembly=mscorlib"
         mc:Ignorable="d"
         Title="DomainLinks Desktop"
@@ -15,11 +16,29 @@
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="16" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
+                Background="#F8F3EA"
+                BorderBrush="#D6D0C4"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="2">
+            <Menu Background="Transparent"
+                  BorderThickness="0"
+                  FontSize="14">
+                <MenuItem Header="_Tools">
+                    <MenuItem Header="OCR Viewer"
+                              Click="OpenOcrViewerMenuItem_OnClick" />
+                </MenuItem>
+            </Menu>
+        </Border>
+
+        <Border Grid.Row="2"
                 x:Name="TopPanelBorder"
                 Background="#18344A"
                 CornerRadius="6"
@@ -108,7 +127,7 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="LeftPaneColumn" Width="280" MinWidth="220" />
                 <ColumnDefinition Width="8" />
@@ -151,7 +170,7 @@
                                     <Button x:Name="AddRootButton"
                                             Width="24"
                                             Height="22"
-                                            Margin="0,0,6,0"
+                                            Margin="0,0,10,0"
                                             Padding="0"
                                             Click="AddRootButton_OnClick"
                                             Background="#CFE9FF"
@@ -165,23 +184,9 @@
                                             </Grid>
                                         </Viewbox>
                                     </Button>
-                                    <Button x:Name="DeleteRootButton"
-                                            Width="24"
-                                            Height="22"
-                                            Padding="0"
-                                            Click="DeleteRootButton_OnClick"
-                                            Background="#CFE9FF"
-                                            BorderBrush="#18344A"
-                                            BorderThickness="1"
-                                            Foreground="#18344A">
-                                        <Viewbox Width="10" Height="10">
-                                            <Rectangle Width="10" Height="2" Fill="#18344A" VerticalAlignment="Center" />
-                                        </Viewbox>
-                                    </Button>
                                     <Button x:Name="AddChildHeaderButton"
                                             Width="24"
                                             Height="22"
-                                            Margin="10,0,6,0"
                                             Padding="0"
                                             Click="AddChildHeaderButton_OnClick"
                                             Background="#CFF1D6"
@@ -193,19 +198,6 @@
                                                 <Rectangle Width="10" Height="2" Fill="#2E7D32" VerticalAlignment="Center" />
                                                 <Rectangle Width="2" Height="10" Fill="#2E7D32" HorizontalAlignment="Center" />
                                             </Grid>
-                                        </Viewbox>
-                                    </Button>
-                                    <Button x:Name="DeleteChildHeaderButton"
-                                            Width="24"
-                                            Height="22"
-                                            Padding="0"
-                                            Click="DeleteChildHeaderButton_OnClick"
-                                            Background="#CFF1D6"
-                                            BorderBrush="#2E7D32"
-                                            BorderThickness="1"
-                                            Foreground="#2E7D32">
-                                        <Viewbox Width="10" Height="10">
-                                            <Rectangle Width="10" Height="2" Fill="#2E7D32" VerticalAlignment="Center" />
                                         </Viewbox>
                                     </Button>
                                 </StackPanel>
@@ -220,6 +212,7 @@
                             Padding="2">
                         <TreeView x:Name="ProjectCollectionsTreeView"
                                   SelectedItemChanged="ProjectCollectionsTreeView_OnSelectedItemChanged"
+                                  PreviewKeyDown="ProjectCollectionsTreeView_OnPreviewKeyDown"
                                   Background="#FFFFFF"
                                   BorderThickness="0">
                         <TreeView.Resources>
@@ -293,7 +286,21 @@
                             </Style>
                             <HierarchicalDataTemplate DataType="{x:Type local:CollectionItem}"
                                                       ItemsSource="{Binding Threads}">
-                                <Grid Margin="2,1,2,1">
+                                <Grid Margin="2,1,2,1"
+                                      PreviewMouseRightButtonDown="TreeNode_OnPreviewMouseRightButtonDown">
+                                    <Grid.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Rename project"
+                                                      Click="RenameRootMenuItem_OnClick"
+                                                      CommandParameter="{Binding}" />
+                                            <MenuItem Header="AI Rename project"
+                                                      Click="AiRenameRootMenuItem_OnClick"
+                                                      CommandParameter="{Binding}" />
+                                            <MenuItem Header="Delete project"
+                                                      Click="DeleteRootMenuItem_OnClick"
+                                                      CommandParameter="{Binding}" />
+                                        </ContextMenu>
+                                    </Grid.ContextMenu>
                                     <TextBox x:Name="RootNameEditor"
                                              Margin="2,0,0,0"
                                              Padding="0"
@@ -324,7 +331,6 @@
                                     <TextBlock Margin="2,0,0,0"
                                                VerticalAlignment="Center"
                                                FontWeight="SemiBold"
-                                               MouseLeftButtonDown="ProjectRootLabel_OnMouseLeftButtonDown"
                                                Tag="{Binding}"
                                                Text="{Binding DisplayName}">
                                         <TextBlock.Style>
@@ -345,7 +351,21 @@
                                 </Grid>
                             </HierarchicalDataTemplate>
                             <DataTemplate DataType="{x:Type local:ChatThreadItem}">
-                                <Grid Margin="2,1,2,1">
+                                <Grid Margin="2,1,2,1"
+                                      PreviewMouseRightButtonDown="TreeNode_OnPreviewMouseRightButtonDown">
+                                    <Grid.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Rename chat"
+                                                      Click="RenameChildMenuItem_OnClick"
+                                                      CommandParameter="{Binding}" />
+                                            <MenuItem Header="AI Rename chat"
+                                                      Click="AiRenameChildMenuItem_OnClick"
+                                                      CommandParameter="{Binding}" />
+                                            <MenuItem Header="Delete chat"
+                                                      Click="DeleteChildMenuItem_OnClick"
+                                                      CommandParameter="{Binding}" />
+                                        </ContextMenu>
+                                    </Grid.ContextMenu>
                                     <TextBox Margin="2,0,0,0"
                                              Padding="0"
                                              BorderThickness="0"
@@ -375,7 +395,6 @@
                                     <TextBlock Margin="2,0,0,0"
                                                VerticalAlignment="Center"
                                                FontSize="14"
-                                               MouseLeftButtonDown="ChildThreadLabel_OnMouseLeftButtonDown"
                                                Tag="{Binding}"
                                                Text="{Binding Title}">
                                         <TextBlock.Style>
@@ -429,6 +448,7 @@
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="220" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
@@ -441,35 +461,103 @@
                                        Margin="0,4,0,0"
                                        Foreground="#5B6770"
                                        FontSize="12"
-                                   Text="Each project root on the left is the actual short-memory collection and upload target." />
+                                    Text="Each project root on the left is the actual short-memory collection and upload target." />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1"
+                                    Margin="12,0,0,0"
+                                    VerticalAlignment="Center">
+                            <TextBlock Foreground="#5B6770"
+                                       FontSize="11"
+                                       Text="Model" />
+                            <ComboBox x:Name="ModelComboBox"
+                                      Margin="0,4,0,0"
+                                      Height="32"
+                                      Padding="6,4"
+                                      DisplayMemberPath="DisplayText"
+                                      SelectedValuePath="Name"
+                                      MinWidth="200" />
                         </StackPanel>
                         <Button x:Name="ClearPromptButton"
-                                Grid.Column="1"
-                                Margin="10,0,0,0"
-                                Padding="14,8"
-                                Click="ClearPromptButton_OnClick"
-                                Content="Clear Prompt" />
-                        <Button x:Name="AskButton"
                                 Grid.Column="2"
+                                Height="32"
                                 Margin="10,0,0,0"
-                                Padding="24,8"
+                                Width="52"
+                                Padding="0"
+                                MinWidth="52"
+                                VerticalAlignment="Bottom"
+                                Click="ClearPromptButton_OnClick"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                ToolTip="Clear prompt">
+                            <Viewbox Width="38"
+                                     Height="24"
+                                     Stretch="Uniform">
+                                <Canvas Width="76"
+                                        Height="48">
+                                    <Path Fill="#C9C9C9"
+                                          Data="M22,4 H60 C66.6,4 72,9.4 72,16 V32 C72,38.6 66.6,44 60,44 H22 C18.8,44 15.8,42.7 13.6,40.4 L2.8,29.6 C-0.9,25.9 -0.9,20.1 2.8,16.4 L13.6,5.6 C15.8,3.3 18.8,2 22,2 Z" />
+                                    <Path Stroke="#F2F2F2"
+                                          StrokeThickness="4"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          Data="M34,16 L50,32 M50,16 L34,32" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
+                        <Button x:Name="AskButton"
+                                Grid.Column="3"
+                                Height="32"
+                                Margin="10,0,0,0"
+                                Width="52"
+                                Padding="0"
+                                MinWidth="52"
+                                VerticalAlignment="Bottom"
                                 Click="AskButton_OnClick"
-                                Content="Ask" />
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                ToolTip="Ask">
+                            <Viewbox Width="28"
+                                     Height="28"
+                                     Stretch="Uniform">
+                                <Canvas Width="64"
+                                        Height="64">
+                                    <Path Fill="#6E7CA0"
+                                          Data="M6,10 L56,30 C58.7,31.1 58.7,34.9 56,36 L6,56 C3.5,57 1,55 1.4,52.2 L5.6,34 L1.4,13.8 C1,11 3.5,9 6,10 Z" />
+                                    <Path Stroke="#F5F7FB"
+                                          StrokeThickness="3"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          Data="M11,33 H28 M11,33 L47,20 M11,33 L47,44" />
+                                </Canvas>
+                            </Viewbox>
+                        </Button>
                     </Grid>
 
                     <Border Grid.Row="2"
                             Background="#F3EFE7"
                             CornerRadius="6"
                             Padding="12">
-                        <TextBox x:Name="PromptTextBox"
-                                 AcceptsReturn="True"
-                                 TextWrapping="Wrap"
-                                 VerticalScrollBarVisibility="Auto"
-                                 MinHeight="120"
-                                 Background="Transparent"
-                                 BorderThickness="0"
-                                 FontSize="14"
-                                 Text="Type a prompt that can use short-term project memory from the left and optional long-term domain context from the right." />
+                        <Grid>
+                            <TextBox x:Name="PromptTextBox"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     MinHeight="120"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     FontSize="16"
+                                     SpellCheck.IsEnabled="True"
+                                     GotFocus="PromptTextBox_OnFocusChanged"
+                                     LostFocus="PromptTextBox_OnFocusChanged"
+                                     PreviewKeyDown="PromptTextBox_OnPreviewKeyDown"
+                                     TextChanged="PromptTextBox_OnTextChanged" />
+                            <TextBlock x:Name="PromptPlaceholderTextBlock"
+                                       Margin="2,2,0,0"
+                                       Foreground="#7A7A7A"
+                                       FontSize="16"
+                                       IsHitTestVisible="False"
+                                       Text="Type a prompt." />
+                        </Grid>
                     </Border>
 
                     <GridSplitter Grid.Row="3"
@@ -523,12 +611,20 @@
 
                                     <StackPanel x:Name="RootUploadPanel"
                                                 Grid.Row="0"
-                                                Orientation="Horizontal"
                                                 Visibility="Collapsed">
                                         <Button x:Name="UploadButton"
-                                                Padding="18,8"
+                                                Height="32"
+                                                Padding="12,5"
+                                                MinWidth="72"
                                                 Click="UploadButton_OnClick"
                                                 Content="Upload" />
+                                        <TextBlock x:Name="UploadStatusTextBlock"
+                                                   Margin="0,8,0,0"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#5B6770"
+                                                   TextWrapping="Wrap"
+                                                   Visibility="Collapsed" />
                                     </StackPanel>
 
                                     <Border Grid.Row="2"
@@ -574,6 +670,8 @@
                                                                                     <ColumnDefinition Width="Auto" />
                                                                                     <ColumnDefinition Width="*" />
                                                                                     <ColumnDefinition Width="Auto" />
+                                                                                    <ColumnDefinition Width="Auto" />
+                                                                                    <ColumnDefinition Width="Auto" />
                                                                                 </Grid.ColumnDefinitions>
                                                                                 <TextBlock Grid.Column="0"
                                                                                            VerticalAlignment="Center"
@@ -591,11 +689,29 @@
                                                                                     <Run Text=" chunks)" />
                                                                                 </TextBlock>
                                                                                 <Button Grid.Column="2"
+                                                                                        MinWidth="74"
+                                                                                        Height="28"
+                                                                                        Margin="10,0,0,0"
+                                                                                        Padding="8,2"
+                                                                                        Tag="{Binding}"
+                                                                                        Click="CopyDocumentTextButton_OnClick"
+                                                                                        Content="Copy Text"
+                                                                                        ToolTip="Copy full extracted text" />
+                                                                                <Button Grid.Column="3"
+                                                                                        MinWidth="74"
+                                                                                        Height="28"
+                                                                                        Margin="8,0,0,0"
+                                                                                        Padding="8,2"
+                                                                                        Tag="{Binding}"
+                                                                                        Click="SaveDocumentTextButton_OnClick"
+                                                                                        Content="Save Text"
+                                                                                        ToolTip="Save full extracted text to a file" />
+                                                                                <Button Grid.Column="4"
                                                                                         Width="28"
                                                                                         Height="28"
                                                                                         HorizontalAlignment="Right"
                                                                                         VerticalAlignment="Center"
-                                                                                        Margin="10,0,0,0"
+                                                                                        Margin="8,0,0,0"
                                                                                         Padding="0"
                                                                                         Tag="{Binding}"
                                                                                         Click="DeleteDocumentButton_OnClick"
@@ -690,20 +806,66 @@
                                                 <RowDefinition Height="10" />
                                                 <RowDefinition Height="*" />
                                             </Grid.RowDefinitions>
-                                            <TextBlock FontSize="15"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="#263746"
-                                                       Text="Response Surface" />
-                                            <TextBox Grid.Row="2"
-                                                     x:Name="ResponseTextBox"
-                                                     Background="Transparent"
-                                                     BorderThickness="0"
-                                                     TextWrapping="Wrap"
-                                                     AcceptsReturn="True"
-                                                     IsReadOnly="True"
-                                                     VerticalScrollBarVisibility="Auto"
-                                                     MinHeight="180"
-                                                     Text="Response output will appear here." />
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock FontSize="15"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#263746"
+                                                           Text="Response Surface" />
+                                                <Button x:Name="SaveThreadButton"
+                                                        Grid.Column="1"
+                                                        Width="38"
+                                                        Height="38"
+                                                        Padding="0"
+                                                        Click="SaveThreadButton_OnClick"
+                                                        ToolTip="Save the whole chat thread as DOCX or HTML"
+                                                        Background="#FFFFFF"
+                                                        BorderBrush="#D6DCE5"
+                                                        BorderThickness="1">
+                                                    <Viewbox Width="20"
+                                                             Height="20">
+                                                        <Canvas Width="20"
+                                                                Height="20">
+                                                            <Rectangle Canvas.Left="4"
+                                                                       Canvas.Top="3"
+                                                                       Width="9"
+                                                                       Height="11"
+                                                                       RadiusX="1.5"
+                                                                       RadiusY="1.5"
+                                                                       Stroke="#315B73"
+                                                                       StrokeThickness="1.5"
+                                                                       Fill="#F3F6FA" />
+                                                            <Rectangle Canvas.Left="7"
+                                                                       Canvas.Top="5"
+                                                                       Width="9"
+                                                                       Height="11"
+                                                                       RadiusX="1.5"
+                                                                       RadiusY="1.5"
+                                                                       Stroke="#315B73"
+                                                                       StrokeThickness="1.5"
+                                                                       Fill="#FFFFFF" />
+                                                            <Path Data="M 11.5 8.5 L 11.5 13 M 9.5 11 L 11.5 13 L 13.5 11 M 8 15.5 H 15"
+                                                                  Stroke="#315B73"
+                                                                  StrokeThickness="1.7"
+                                                                  StrokeStartLineCap="Round"
+                                                                  StrokeEndLineCap="Round"
+                                                                  StrokeLineJoin="Round" />
+                                                        </Canvas>
+                                                    </Viewbox>
+                                                </Button>
+                                            </Grid>
+                                            <Border Grid.Row="2"
+                                                    Background="#F8F6F1"
+                                                    BorderBrush="#E2DBCF"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="0"
+                                                    ClipToBounds="True">
+                                                <wv2:WebView2 x:Name="ResponseWebView" />
+                                            </Border>
                                         </Grid>
                                     </Border>
                                 </Grid>
