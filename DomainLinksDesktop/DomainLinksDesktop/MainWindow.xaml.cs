@@ -34,6 +34,7 @@ public partial class MainWindow : Window
 {
     private sealed record OcrExtractionResult(bool Success, string Text, string ErrorMessage);
     private sealed record ChatExchangeExportItem(int ExchangeNumber, ChatMessageItem? UserMessage, ChatMessageItem? AssistantMessage);
+    private const string ShellHostName = "domainlinks-shell.local";
 
     private static readonly JsonSerializerOptions StreamJsonOptions = new()
     {
@@ -44,10 +45,11 @@ public partial class MainWindow : Window
     private readonly HttpClient _httpClient;
     private readonly HttpClient _ollamaHttpClient;
     private readonly ObservableCollection<CollectionItem> _projectCollections = [];
-    private readonly ObservableCollection<DomainItem> _knowledgeDomains = [];
+    private readonly ObservableCollection<DomainItem> _capabilityDomains = [];
     private readonly ObservableCollection<ModelOptionItem> _availableModels = [];
     private readonly MarkdownPipeline _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
     private readonly LocalChatStore _localChatStore = new();
+    private bool _isUpdatingContextSelection;
     private bool _isTopPanelExpanded;
     private bool _isStreamingResponseActive;
     private CollectionItem? _activeProjectCollection;
@@ -56,6 +58,7 @@ public partial class MainWindow : Window
     private string? _defaultChatModel;
     private ChatBackupService? _chatBackupService;
     private ChatBackupUserIdentity? _chatBackupUser;
+    private DomainStoreWindow? _domainStoreWindow;
 
     public MainWindow()
     {
@@ -80,7 +83,7 @@ public partial class MainWindow : Window
         };
         _chatBackupService = new ChatBackupService(_httpClient);
         ProjectCollectionsTreeView.ItemsSource = _projectCollections;
-        DomainContextTreeView.ItemsSource = _knowledgeDomains;
+        DomainContextTreeView.ItemsSource = _capabilityDomains;
         ModelComboBox.ItemsSource = _availableModels;
         Loaded += MainWindow_OnLoaded;
         Closing += MainWindow_OnClosing;
@@ -93,6 +96,15 @@ public partial class MainWindow : Window
         LeftPaneColumn.Width = new GridLength(_settings.LeftPaneWidth);
         RightPaneColumn.Width = new GridLength(_settings.RightPaneWidth);
         PromptInputRow.Height = new GridLength(_settings.PromptPaneHeight);
+        await ShellMenuWebView.EnsureCoreWebView2Async();
+        ShellMenuWebView.CoreWebView2.Settings.IsWebMessageEnabled = true;
+        ShellMenuWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+        ShellMenuWebView.CoreWebView2.WebMessageReceived += ShellMenuWebView_OnWebMessageReceived;
+        ShellMenuWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+            ShellHostName,
+            AppContext.BaseDirectory,
+            CoreWebView2HostResourceAccessKind.DenyCors);
+        ShellMenuWebView.Source = new Uri($"https://{ShellHostName}/WebShell/menu-host.html");
         await ResponseWebView.EnsureCoreWebView2Async();
         ResponseWebView.CoreWebView2.Settings.IsWebMessageEnabled = true;
         ResponseWebView.CoreWebView2.WebMessageReceived += ResponseWebView_OnWebMessageReceived;
@@ -113,6 +125,13 @@ public partial class MainWindow : Window
             LeftPaneWidth = LeftPaneColumn.ActualWidth,
             RightPaneWidth = RightPaneColumn.ActualWidth,
             PromptPaneHeight = PromptInputRow.ActualHeight,
+            DomainStoreWindowWidth = _settings.DomainStoreWindowWidth,
+            DomainStoreWindowHeight = _settings.DomainStoreWindowHeight,
+            DomainStoreWindowLeft = _settings.DomainStoreWindowLeft,
+            DomainStoreWindowTop = _settings.DomainStoreWindowTop,
+            DomainStoreLeftPaneWidth = _settings.DomainStoreLeftPaneWidth,
+            DomainStoreCenterPaneWidth = _settings.DomainStoreCenterPaneWidth,
+            DomainStoreCollectionsPaneHeight = _settings.DomainStoreCollectionsPaneHeight,
             LastSelectedModel = ModelComboBox.SelectedValue as string ?? string.Empty,
         };
         saved.Save();
@@ -134,26 +153,8 @@ public partial class MainWindow : Window
             _chatBackupUser = _chatBackupService?.ResolveCurrentUser();
 
             _projectCollections.Clear();
-            _knowledgeDomains.Clear();
-            foreach (var domain in domains)
-            {
-                foreach (var collection in collections.Where(c => c.DomainCode == domain.DomainCode))
-                {
-                    domain.Collections.Add(collection);
-                }
-                if (domain.DomainType == "ProjectMemory")
-                {
-                    foreach (var collection in domain.Collections)
-                    {
-                        collection.IsExpanded = true;
-                        _projectCollections.Add(collection);
-                    }
-                }
-                else if (domain.DomainType == "Knowledge")
-                {
-                    _knowledgeDomains.Add(domain);
-                }
-            }
+            _capabilityDomains.Clear();
+            BuildDomainTrees(domains, collections);
 
             await RestoreChatsFromBackupIfNeededAsync();
             RestoreLocalProjectChats();
@@ -255,11 +256,112 @@ public partial class MainWindow : Window
 
     private void OpenOcrViewerMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
+        OpenOcrViewer();
+    }
+
+    private void OpenOcrViewer()
+    {
         var viewer = new OcrViewerWindow(_settings.OllamaBaseUrl)
         {
             Owner = this,
         };
         viewer.Show();
+    }
+
+    private void ShellMenuWebView_OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(e.WebMessageAsJson);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("type", out var typeElement) ||
+                !string.Equals(typeElement.GetString(), "shell-action", StringComparison.OrdinalIgnoreCase) ||
+                !root.TryGetProperty("action", out var actionElement))
+            {
+                return;
+            }
+
+            HandleShellMenuAction(actionElement.GetString() ?? string.Empty);
+        }
+        catch
+        {
+            // Ignore malformed menu messages to keep the shell resilient.
+        }
+    }
+
+    private void HandleShellMenuAction(string action)
+    {
+        switch (action)
+        {
+            case "open-ocr-viewer":
+                OpenOcrViewer();
+                break;
+            case "show-projects":
+                ShowProjectsFromShell();
+                break;
+            case "focus-knowledge":
+                DomainContextTreeView.Focus();
+                ShowEmptyResponseState("Capability Domains focused. Use the right-side checkboxes to include long-term context.");
+                break;
+            case "open-domain-store":
+                OpenDomainStore();
+                break;
+            case "focus-prompt":
+                PromptTextBox.Focus();
+                PromptTextBox.SelectAll();
+                break;
+            case "new-project":
+                AddRootButton_OnClick(AddRootButton, new RoutedEventArgs(Button.ClickEvent, AddRootButton));
+                break;
+            case "new-chat":
+                AddChildHeaderButton_OnClick(AddChildHeaderButton, new RoutedEventArgs(Button.ClickEvent, AddChildHeaderButton));
+                break;
+            case "save-thread":
+                SaveThreadButton_OnClick(SaveThreadButton, new RoutedEventArgs(Button.ClickEvent, SaveThreadButton));
+                break;
+            case "toggle-status":
+                TopPanelToggleButton_OnClick(TopPanelToggleButton, new RoutedEventArgs(Button.ClickEvent, TopPanelToggleButton));
+                break;
+            case "ask":
+                AskButton_OnClick(AskButton, new RoutedEventArgs(Button.ClickEvent, AskButton));
+                break;
+        }
+    }
+
+    private void ShowProjectsFromShell()
+    {
+        var target = _activeProjectCollection ?? _projectCollections.FirstOrDefault();
+        if (target is null)
+        {
+            ShowEmptyResponseState("No project collection is available yet.");
+            return;
+        }
+
+        SelectTreeItem(target);
+        ProjectCollectionsTreeView.Focus();
+    }
+
+    private void OpenDomainStore()
+    {
+        if (_domainStoreWindow is not null)
+        {
+            if (_domainStoreWindow.IsVisible)
+            {
+                _domainStoreWindow.Activate();
+                _domainStoreWindow.Focus();
+                return;
+            }
+
+            _domainStoreWindow = null;
+        }
+
+        _domainStoreWindow = new DomainStoreWindow(_settings)
+        {
+            Owner = this,
+        };
+        _domainStoreWindow.Closed += (_, _) => _domainStoreWindow = null;
+        _domainStoreWindow.Show();
+        _domainStoreWindow.Activate();
     }
 
     private async Task<string> BuildStatusDetailAsync(Dictionary<string, object>? health)
@@ -532,6 +634,21 @@ public partial class MainWindow : Window
 
     private void ContextCheckBox_OnChanged(object sender, RoutedEventArgs e)
     {
+        if (_isUpdatingContextSelection)
+        {
+            return;
+        }
+
+        if ((sender as FrameworkElement)?.DataContext is DomainItem domain)
+        {
+            ApplyDomainSelection(domain, domain.IsIncluded == true);
+            RefreshAncestorSelectionStates(domain.ParentDomain);
+        }
+        else if ((sender as FrameworkElement)?.DataContext is CollectionItem collection)
+        {
+            RefreshAncestorSelectionStates(collection.ParentDomain);
+        }
+
         UpdateIncludedContextSummary();
     }
 
@@ -673,8 +790,7 @@ public partial class MainWindow : Window
         ShowEmptyResponseState("Thinking...");
         try
         {
-            var longTermCollections = _knowledgeDomains
-                .SelectMany(domain => domain.Collections)
+            var longTermCollections = EnumerateCapabilityCollections(_capabilityDomains)
                 .Where(collection => collection.IsIncluded)
                 .Select(collection => collection.CollectionCode)
                 .ToList();
@@ -1522,15 +1638,176 @@ public partial class MainWindow : Window
 
     private void UpdateIncludedContextSummary()
     {
-        var includedCollections = _knowledgeDomains
-            .SelectMany(domain => domain.Collections)
+        var includedCollections = EnumerateCapabilityCollections(_capabilityDomains)
             .Where(collection => collection.IsIncluded)
             .Select(collection => $"{collection.DomainDisplayName} / {collection.DisplayName}")
             .ToList();
 
         IncludedContextTextBlock.Text = includedCollections.Count == 0
-            ? "No durable domains selected."
-            : $"Included durable context: {string.Join("; ", includedCollections)}";
+            ? "No capability domains selected."
+            : $"Included capability context: {string.Join("; ", includedCollections)}";
+    }
+
+    private void BuildDomainTrees(List<DomainItem> domains, List<CollectionItem> collections)
+    {
+        var domainLookup = domains.ToDictionary(domain => domain.DomainId, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var domain in domains)
+        {
+            domain.ParentDomain = null;
+            domain.ChildDomains.Clear();
+            domain.Collections.Clear();
+            domain.TreeChildren.Clear();
+            domain.IsExpanded = false;
+            domain.IsIncluded = false;
+        }
+
+        foreach (var collection in collections)
+        {
+            collection.ParentDomain = null;
+            var domain = domains.FirstOrDefault(item =>
+                string.Equals(item.DomainCode, collection.DomainCode, StringComparison.OrdinalIgnoreCase));
+            if (domain is null)
+            {
+                continue;
+            }
+
+            collection.ParentDomain = domain;
+            domain.Collections.Add(collection);
+        }
+
+        foreach (var domain in domains)
+        {
+            if (!string.IsNullOrWhiteSpace(domain.DomainParentId)
+                && domainLookup.TryGetValue(domain.DomainParentId, out var parentDomain))
+            {
+                domain.ParentDomain = parentDomain;
+                parentDomain.ChildDomains.Add(domain);
+            }
+        }
+
+        foreach (var domain in domains)
+        {
+            foreach (var childDomain in domain.ChildDomains
+                         .OrderBy(item => item.DisplayOrder)
+                         .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                domain.TreeChildren.Add(childDomain);
+            }
+
+            foreach (var collection in domain.Collections.OrderBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                domain.TreeChildren.Add(collection);
+            }
+        }
+
+        foreach (var domain in domains
+                     .Where(domain =>
+                         !string.Equals(domain.DomainCode, "projects", StringComparison.OrdinalIgnoreCase)
+                         && string.IsNullOrWhiteSpace(domain.DomainParentId))
+                     .OrderBy(domain => domain.DisplayOrder)
+                     .ThenBy(domain => domain.DisplayName, StringComparer.OrdinalIgnoreCase))
+        {
+            _capabilityDomains.Add(domain);
+        }
+
+        foreach (var collection in collections
+                     .Where(collection => string.Equals(collection.DomainCode, "projects", StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(collection => collection.DisplayName, StringComparer.OrdinalIgnoreCase))
+        {
+            collection.IsExpanded = true;
+            _projectCollections.Add(collection);
+        }
+
+        foreach (var domain in _capabilityDomains)
+        {
+            RefreshDomainSelectionState(domain);
+        }
+    }
+
+    private void ApplyDomainSelection(DomainItem domain, bool isIncluded)
+    {
+        _isUpdatingContextSelection = true;
+        try
+        {
+            foreach (var currentDomain in EnumerateDomainTree(domain))
+            {
+                currentDomain.IsIncluded = isIncluded;
+                foreach (var collection in currentDomain.Collections)
+                {
+                    collection.IsIncluded = isIncluded;
+                }
+            }
+        }
+        finally
+        {
+            _isUpdatingContextSelection = false;
+        }
+    }
+
+    private void RefreshAncestorSelectionStates(DomainItem? domain)
+    {
+        _isUpdatingContextSelection = true;
+        try
+        {
+            while (domain is not null)
+            {
+                RefreshDomainSelectionState(domain);
+                domain = domain.ParentDomain;
+            }
+        }
+        finally
+        {
+            _isUpdatingContextSelection = false;
+        }
+    }
+
+    private void RefreshDomainSelectionState(DomainItem domain)
+    {
+        var childDomainStates = domain.ChildDomains
+            .Select(child => child.IsIncluded)
+            .ToList();
+        var collectionStates = domain.Collections
+            .Select(collection => collection.IsIncluded ? (bool?)true : false)
+            .ToList();
+        var combinedStates = childDomainStates.Concat(collectionStates).ToList();
+
+        domain.IsIncluded = combinedStates.Count switch
+        {
+            0 => false,
+            _ when combinedStates.All(state => state == true) => true,
+            _ when combinedStates.All(state => state == false) => false,
+            _ => null,
+        };
+    }
+
+    private static IEnumerable<DomainItem> EnumerateDomainTree(DomainItem domain)
+    {
+        yield return domain;
+
+        foreach (var childDomain in domain.ChildDomains)
+        {
+            foreach (var descendant in EnumerateDomainTree(childDomain))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
+    private static IEnumerable<CollectionItem> EnumerateCapabilityCollections(IEnumerable<DomainItem> domains)
+    {
+        foreach (var domain in domains)
+        {
+            foreach (var collection in domain.Collections)
+            {
+                yield return collection;
+            }
+
+            foreach (var collection in EnumerateCapabilityCollections(domain.ChildDomains))
+            {
+                yield return collection;
+            }
+        }
     }
 
     private void ShowEmptyResponseState(string message)

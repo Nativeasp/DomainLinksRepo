@@ -19,23 +19,27 @@ from .repositories import (
     create_text_document,
     delete_content_unit,
     get_recent_context_units,
+    get_domain_assist_context,
     has_user_chat_backup_files,
     list_collection_documents,
     list_document_chunks,
     list_collections,
     list_domains,
+    list_domain_types,
     list_retrieval_profiles,
     list_user_chat_backup_files,
     mark_user_chat_backup_files_restored,
     upsert_app_user,
     upsert_user_chat_backup_file,
     update_collection,
+    update_domain,
 )
 
 
 class CreateDomainRequest(BaseModel):
     domainCode: str
-    domainType: str
+    domainTypeId: int | None = None
+    domainParentId: str | None = None
     displayName: str
     description: str | None = None
 
@@ -57,6 +61,19 @@ class CreateTextDocumentRequest(BaseModel):
 class UpdateCollectionRequest(BaseModel):
     displayName: str
     description: str | None = None
+
+
+class UpdateDomainRequest(BaseModel):
+    displayName: str
+    description: str | None = None
+    domainTypeId: int | None = None
+
+
+class DomainAssistRequest(BaseModel):
+    domainCode: str
+    instruction: str
+    draftText: str | None = None
+    model: str | None = None
 
 
 class AskRequest(BaseModel):
@@ -196,6 +213,48 @@ def _extract_metrics(payload: dict[str, object], model: str | None = None) -> di
     }
 
 
+def _build_domain_assist_prompt(
+    domain_context: dict[str, object],
+    instruction: str,
+    draft_text: str | None,
+) -> str:
+    domain = domain_context.get("domain") or {}
+    child_domains = domain_context.get("childDomains") or []
+    collections = domain_context.get("collections") or []
+    documents = domain_context.get("documents") or []
+
+    child_lines = [
+        f"- {item.get('displayName')} ({item.get('domainType') or 'Unknown type'})"
+        for item in child_domains
+    ]
+    collection_lines = [
+        f"- {item.get('DisplayName')} [{item.get('CollectionCode')}] docs={item.get('DocumentCount') or 0}"
+        for item in collections
+    ]
+    document_lines = [
+        f"- {item.get('SourceName')} ({item.get('SourceType') or 'unknown'}) in {item.get('CollectionDisplayName')} chunks={item.get('ChunkCount') or 0}"
+        for item in documents
+    ]
+
+    return (
+        "You are helping curate a local RAG domain store for an internal knowledge workspace. "
+        "Write concise, clear domain wording that improves retrieval usefulness. "
+        "Preserve organizational meaning. Avoid generic filler and avoid marketing tone. "
+        "Help distinguish the selected domain from sibling domains and describe what belongs in it. "
+        "Return only the suggested wording or answer requested by the user. "
+        "Do not use bullet points unless the user explicitly asks for them.\n\n"
+        f"Selected domain name: {domain.get('DisplayName') or ''}\n"
+        f"Selected domain code: {domain.get('DomainCode') or ''}\n"
+        f"Selected domain type: {domain.get('DomainType') or ''}\n"
+        f"Parent path: {domain_context.get('parentPath') or '(root)'}\n"
+        f"Current domain description/context text:\n{draft_text if draft_text is not None else (domain.get('Description') or '')}\n\n"
+        f"Child domains:\n{chr(10).join(child_lines) if child_lines else 'None'}\n\n"
+        f"Collections in this domain:\n{chr(10).join(collection_lines) if collection_lines else 'None'}\n\n"
+        f"Recent documents in this domain:\n{chr(10).join(document_lines) if document_lines else 'None'}\n\n"
+        f"User instruction:\n{instruction.strip()}\n"
+    )
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
@@ -230,15 +289,47 @@ def create_app() -> FastAPI:
     def domains() -> list[dict[str, object]]:
         return list_domains(settings)
 
+    @app.get("/domain-types")
+    def domain_types() -> list[dict[str, object]]:
+        return list_domain_types(settings)
+
     @app.post("/domains")
     def add_domain(request: CreateDomainRequest) -> dict[str, object]:
         return create_domain(
             settings,
             domain_code=request.domainCode,
-            domain_type=request.domainType,
+            domain_type_id=request.domainTypeId,
             display_name=request.displayName,
             description=request.description,
+            domain_parent_id=request.domainParentId,
         )
+
+    @app.put("/domains/{domainCode}")
+    def edit_domain(domainCode: str, request: UpdateDomainRequest) -> dict[str, object]:
+        return update_domain(
+            settings,
+            domain_code=domainCode,
+            display_name=request.displayName,
+            description=request.description,
+            domain_type_id=request.domainTypeId,
+        )
+
+    @app.post("/domains/assist")
+    def assist_domain(request: DomainAssistRequest) -> dict[str, object]:
+        instruction = request.instruction.strip()
+        if not instruction:
+            raise HTTPException(status_code=400, detail="Instruction is required.")
+
+        domain_context = get_domain_assist_context(settings, request.domainCode)
+        compiled_prompt = _build_domain_assist_prompt(domain_context, instruction, request.draftText)
+        answer_payload = _generate_with_ollama(settings, compiled_prompt, model=request.model)
+        answer = str(answer_payload.get("response", "")).strip()
+
+        return {
+            "answer": answer,
+            "systemPromptLabel": "Domain curation assist",
+            "metrics": _extract_metrics(answer_payload, model=request.model),
+        }
 
     @app.get("/collections")
     def collections(domainCode: str | None = None) -> list[dict[str, object]]:

@@ -1,0 +1,617 @@
+<Window x:Class="DomainLinksDesktop.DomainStoreWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:DomainLinksDesktop"
+        Title="Domain Store"
+        Height="860"
+        Width="1500"
+        MinHeight="720"
+        MinWidth="1180"
+        WindowStartupLocation="CenterOwner"
+        Background="#F3F1EC">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="14" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Background="#18344A"
+                CornerRadius="8"
+                Padding="16,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel>
+                    <TextBlock Foreground="#F7F3EA"
+                               FontSize="22"
+                               FontWeight="SemiBold"
+                               Text="Domain Store" />
+                    <TextBlock Margin="0,4,0,0"
+                               Foreground="#D7E2EA"
+                               FontSize="12"
+                               Text="Manage domain trees, context text, collections, and retrieval-ready documents." />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top">
+                    <Button x:Name="RefreshButton"
+                            Width="88"
+                            Height="32"
+                            Margin="0,0,10,0"
+                            Click="RefreshButton_OnClick"
+                            Content="Refresh" />
+                    <Button x:Name="CloseButton"
+                            Width="88"
+                            Height="32"
+                            Click="CloseButton_OnClick"
+                            Content="Close" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="DomainTreeColumn" Width="300" MinWidth="240" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition x:Name="SummaryColumn" Width="500" MinWidth="360" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="#FAF8F3"
+                    BorderBrush="#D6D0C4"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="10" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="12" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel>
+                        <TextBlock FontSize="17"
+                                   FontWeight="SemiBold"
+                                   Foreground="#263746"
+                                   Text="Domain Tree" />
+                        <TextBlock Margin="0,4,0,0"
+                                   Foreground="#5B6770"
+                                   FontSize="12"
+                                   Text="Create and shape domain hierarchies for long-term RAG context." />
+                        <StackPanel Orientation="Horizontal"
+                                    Margin="0,10,0,0">
+                            <Button Width="86"
+                                    Height="30"
+                                    Margin="0,0,8,0"
+                                    Click="AddRootButton_OnClick"
+                                    Content="Add Root" />
+                            <Button Width="86"
+                                    Height="30"
+                                    Click="AddChildButton_OnClick"
+                                    Content="Add Child" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBox Grid.Row="2"
+                             x:Name="DomainSearchTextBox"
+                             Height="34"
+                             Padding="10,6"
+                             VerticalContentAlignment="Center"
+                             TextChanged="DomainSearchTextBox_OnTextChanged"
+                             ToolTip="Search domains by name, code, type, or description" />
+
+                    <Border Grid.Row="4"
+                            Background="#FFFFFF"
+                            BorderBrush="#D6D0C4"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="8">
+                        <TreeView x:Name="DomainTreeView"
+                                  SelectedItemChanged="DomainTreeView_OnSelectedItemChanged"
+                                  BorderThickness="0"
+                                  Background="Transparent">
+                            <TreeView.Resources>
+                                <HierarchicalDataTemplate DataType="{x:Type local:DomainItem}"
+                                                          ItemsSource="{Binding ChildDomains}">
+                                    <Border Padding="6,5"
+                                            Margin="0,1,0,1"
+                                            CornerRadius="4">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Right"
+                                                    Margin="8,0,0,0"
+                                                    Padding="6,2"
+                                                    CornerRadius="9"
+                                                    Background="#EAF4FF">
+                                                <TextBlock Foreground="#18344A"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"
+                                                           Text="{Binding DomainType}" />
+                                            </Border>
+                                            <TextBlock VerticalAlignment="Center"
+                                                       FontWeight="SemiBold"
+                                                       Text="{Binding DisplayName}" />
+                                        </DockPanel>
+                                    </Border>
+                                </HierarchicalDataTemplate>
+                            </TreeView.Resources>
+                        </TreeView>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1"
+                          Width="8"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Background="#D6D0C4"
+                          ResizeBehavior="PreviousAndNext"
+                          ResizeDirection="Columns"
+                          ShowsPreview="True" />
+
+            <Border Grid.Column="2"
+                    Background="#FAF8F3"
+                    BorderBrush="#D6D0C4"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="12" />
+                        <RowDefinition Height="*" MinHeight="320" />
+                        <RowDefinition Height="8" />
+                        <RowDefinition x:Name="CollectionsSectionRow" Height="260" MinHeight="180" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel>
+                        <TextBlock FontSize="17"
+                                   FontWeight="SemiBold"
+                                   Foreground="#263746"
+                                   Text="Domain Summary" />
+                        <TextBlock Margin="0,4,0,0"
+                                   Foreground="#5B6770"
+                                   FontSize="12"
+                                   Text="Description is the current domain context text used to shape retrieval." />
+                    </StackPanel>
+
+                    <Border Grid.Row="2"
+                            Background="#FFFFFF"
+                            BorderBrush="#D6D0C4"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                        <Grid Margin="0,0,18,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="12" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="12" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel>
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Display Name" />
+                                    <TextBox x:Name="DomainNameTextBox"
+                                             Margin="0,4,0,0"
+                                             Height="34"
+                                             Padding="8,6" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Domain Type" />
+                                    <ComboBox x:Name="DomainTypeComboBox"
+                                              Margin="0,4,0,0"
+                                              Height="34"
+                                              DisplayMemberPath="Name"
+                                              SelectedValuePath="Id" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel>
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Domain Code" />
+                                    <TextBox x:Name="DomainCodeTextBox"
+                                             Margin="0,4,0,0"
+                                             Height="34"
+                                             Padding="8,6"
+                                             IsReadOnly="True"
+                                             Background="#F7F4EE" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Parent Path" />
+                                    <TextBox x:Name="DomainParentPathTextBox"
+                                             Margin="0,4,0,0"
+                                             Height="34"
+                                             Padding="8,6"
+                                             IsReadOnly="True"
+                                             Background="#F7F4EE" />
+                                </StackPanel>
+                            </Grid>
+
+                            <StackPanel Grid.Row="4">
+                                <TextBlock Foreground="#5B6770"
+                                           FontSize="11"
+                                           Text="Domain Summary / Context Text" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Foreground="#5B6770"
+                                           FontSize="12"
+                                           TextWrapping="Wrap"
+                                           Text="Use this description to define what the domain means, what belongs here, and how it should shape retrieval." />
+                            </StackPanel>
+
+                            <TextBox Grid.Row="6"
+                                     x:Name="DomainDescriptionTextBox"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto"
+                                     TextWrapping="Wrap"
+                                     Height="180"
+                                     Padding="10" />
+
+                            <Expander Grid.Row="8"
+                                      Header="AI Writing Assist"
+                                      IsExpanded="True">
+                                <Border Margin="0,8,0,0"
+                                        Padding="10"
+                                        Background="#F8F6F1"
+                                        BorderBrush="#E2DBCF"
+                                        BorderThickness="1"
+                                        CornerRadius="6">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="8" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="8" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="8" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="8" />
+                                            <RowDefinition Height="140" />
+                                            <RowDefinition Height="8" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Foreground="#5B6770"
+                                                   FontSize="12"
+                                                   Text="System prompt: Domain curation assist is active for the selected domain." />
+
+                                        <TextBox Grid.Row="2"
+                                                 x:Name="AssistInstructionTextBox"
+                                                 Height="34"
+                                                 Padding="8,6"
+                                                 VerticalContentAlignment="Center"
+                                                 Text="Improve this domain wording for retrieval clarity." />
+
+                                        <UniformGrid Grid.Row="4"
+                                                     Columns="3">
+                                            <Button Margin="0,0,8,8"
+                                                    Padding="10,4"
+                                                    Click="AssistQuickActionButton_OnClick"
+                                                    Tag="Draft a clean domain description for retrieval."
+                                                    Content="Draft Context" />
+                                            <Button Margin="0,0,8,8"
+                                                    Padding="10,4"
+                                                    Click="AssistQuickActionButton_OnClick"
+                                                    Tag="Improve the wording while preserving intent."
+                                                    Content="Improve Wording" />
+                                            <Button Margin="0,0,8,8"
+                                                    Padding="10,4"
+                                                    Click="AssistQuickActionButton_OnClick"
+                                                    Tag="Make this shorter and tighter without losing meaning."
+                                                    Content="Make Shorter" />
+                                            <Button Margin="0,0,8,8"
+                                                    Padding="10,4"
+                                                    Click="AssistQuickActionButton_OnClick"
+                                                    Tag="Make this more specific about what belongs in this domain."
+                                                    Content="More Specific" />
+                                            <Button Margin="0,0,8,8"
+                                                    Padding="10,4"
+                                                    Click="AssistQuickActionButton_OnClick"
+                                                    Tag="Align this wording with the parent and child domain structure."
+                                                    Content="Align To Tree" />
+                                        </UniformGrid>
+
+                                        <StackPanel Grid.Row="6"
+                                                    Orientation="Horizontal"
+                                                    HorizontalAlignment="Right">
+                                            <Button x:Name="GenerateAssistButton"
+                                                    Width="136"
+                                                    Height="32"
+                                                    Click="GenerateAssistButton_OnClick"
+                                                    Background="#18344A"
+                                                    Foreground="#FFFFFF"
+                                                    Content="Generate Suggestion" />
+                                        </StackPanel>
+
+                                        <TextBox Grid.Row="8"
+                                                 x:Name="AssistResponseTextBox"
+                                                 IsReadOnly="True"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Padding="10"
+                                                 Background="#FFFFFF"
+                                                 BorderBrush="#D6D0C4"
+                                                 BorderThickness="1" />
+
+                                        <StackPanel Grid.Row="10"
+                                                    Orientation="Horizontal"
+                                                    HorizontalAlignment="Right">
+                                            <Button Width="88"
+                                                    Height="32"
+                                                    Margin="0,0,8,0"
+                                                    Click="CopyAssistButton_OnClick"
+                                                    Content="Copy" />
+                                            <Button Width="88"
+                                                    Height="32"
+                                                    Margin="0,0,8,0"
+                                                    Click="AppendAssistButton_OnClick"
+                                                    Content="Append" />
+                                            <Button Width="96"
+                                                    Height="32"
+                                                    Click="ReplaceAssistButton_OnClick"
+                                                    Content="Replace" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </Expander>
+
+                            <StackPanel Grid.Row="10">
+                                <TextBlock Foreground="#5B6770"
+                                           FontSize="11"
+                                           Text="Domain Stats" />
+                                <TextBlock x:Name="DomainStatsTextBlock"
+                                           Margin="0,4,0,0"
+                                           Foreground="#263746"
+                                           FontWeight="SemiBold"
+                                           Text="Select a domain" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="12"
+                                        Orientation="Horizontal"
+                                        HorizontalAlignment="Right">
+                                <Button Width="96"
+                                        Height="32"
+                                        Margin="0,0,10,0"
+                                        Click="RevertDomainButton_OnClick"
+                                        Content="Revert" />
+                                <Button Width="96"
+                                        Height="32"
+                                        Click="SaveDomainButton_OnClick"
+                                        Background="#18344A"
+                                        Foreground="#FFFFFF"
+                                        Content="Save" />
+                            </StackPanel>
+                        </Grid>
+                        </ScrollViewer>
+                    </Border>
+
+                    <GridSplitter Grid.Row="3"
+                                  Height="8"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  Background="#D6D0C4"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ResizeDirection="Rows"
+                                  ShowsPreview="True" />
+
+                    <Grid Grid.Row="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="12" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock FontSize="17"
+                                           FontWeight="SemiBold"
+                                           Foreground="#263746"
+                                           Text="Collections" />
+                                <TextBlock Margin="0,4,0,0"
+                                           Foreground="#5B6770"
+                                           FontSize="12"
+                                           Text="Collections group the source corpora under the selected domain." />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Width="118"
+                                    Height="32"
+                                    Click="NewCollectionButton_OnClick"
+                                    Content="New Collection" />
+                        </Grid>
+
+                        <Border Grid.Row="2"
+                                Background="#FFFFFF"
+                                BorderBrush="#D6D0C4"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="8">
+                            <ListBox x:Name="CollectionsListBox"
+                                     SelectionChanged="CollectionsListBox_OnSelectionChanged"
+                                     BorderThickness="0"
+                                     Background="Transparent">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type local:CollectionItem}">
+                                        <Border Margin="0,0,0,8"
+                                                Padding="10"
+                                                Background="#F8F6F1"
+                                                BorderBrush="#E2DBCF"
+                                                BorderThickness="1"
+                                                CornerRadius="6">
+                                            <StackPanel>
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Foreground="#263746"
+                                                           Text="{Binding DisplayName}" />
+                                                <TextBlock Margin="0,4,0,0"
+                                                           Foreground="#5B6770"
+                                                           FontSize="11"
+                                                           Text="{Binding CollectionCode}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="3"
+                          Width="8"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Background="#D6D0C4"
+                          ResizeBehavior="PreviousAndNext"
+                          ResizeDirection="Columns"
+                          ShowsPreview="True" />
+
+            <Border Grid.Column="4"
+                    Background="#FAF8F3"
+                    BorderBrush="#D6D0C4"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="18,14,14,14">
+                <Grid Margin="6,0,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="12" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="12" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock FontSize="17"
+                                       FontWeight="SemiBold"
+                                       Foreground="#263746"
+                                       Text="Documents" />
+                            <TextBlock Margin="0,4,0,0"
+                                       Foreground="#5B6770"
+                                       FontSize="12"
+                                       Text="Documents stay directly accessible to the end user while also feeding chunked retrieval and later whole-document inclusion." />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1"
+                                   x:Name="DocumentScopeTextBlock"
+                                   VerticalAlignment="Center"
+                                   Foreground="#5B6770"
+                                   FontSize="12"
+                                   Text="No collection selected" />
+                    </Grid>
+
+                    <StackPanel Grid.Row="2"
+                                Orientation="Horizontal">
+                        <Button Width="94"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Click="UploadDocumentButton_OnClick"
+                                Content="Upload File" />
+                        <Button Width="82"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Click="AddTextButton_OnClick"
+                                Content="Add Text" />
+                        <Button Width="88"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Click="OpenTextButton_OnClick"
+                                Content="Open Text" />
+                        <Button Width="74"
+                                Height="32"
+                                Click="DeleteDocumentButton_OnClick"
+                                Content="Delete" />
+                    </StackPanel>
+
+                    <DataGrid Grid.Row="4"
+                              x:Name="DocumentsDataGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              HeadersVisibility="Column"
+                              SelectionMode="Single"
+                              MouseDoubleClick="DocumentsDataGrid_OnMouseDoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Document"
+                                                Width="2*"
+                                                Binding="{Binding SourceName}" />
+                            <DataGridTextColumn Header="Collection"
+                                                Width="1.4*"
+                                                Binding="{Binding CollectionCode}" />
+                            <DataGridTextColumn Header="Source"
+                                                Width="1.1*"
+                                                Binding="{Binding SourceType}" />
+                            <DataGridTextColumn Header="Embed Status"
+                                                Width="1.1*"
+                                                Binding="{Binding EmbedStatusDisplay}" />
+                            <DataGridTextColumn Header="Updated"
+                                                Width="1.2*"
+                                                Binding="{Binding UpdatedAtUtc, StringFormat={}{0:yyyy-MM-dd HH:mm}}" />
+                            <DataGridTextColumn Header="Chunks"
+                                                Width="0.8*"
+                                                Binding="{Binding ContentUnitCount}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <TextBlock Grid.Row="4"
+                   x:Name="StatusTextBlock"
+                   Foreground="#5B6770"
+                   FontSize="12"
+                   Text="Ready." />
+    </Grid>
+</Window>

@@ -11,24 +11,134 @@ def list_domains(settings: Settings) -> list[dict[str, object]]:
         settings,
         """
         SELECT
-            DomainId,
-            DomainCode,
-            DomainType,
-            DisplayName,
-            Description,
-            Status
-        FROM dbo.Domains
-        WHERE Status = 'Active'
+            d.DomainId,
+            d.DomainParentId,
+            d.DomainTypeId,
+            d.DisplayOrder,
+            d.DomainCode,
+            d.DisplayName,
+            d.Description,
+            d.Status,
+            dt.NAME AS DomainType
+        FROM dbo.Domains d
+        LEFT JOIN dbo.DomainTypes dt
+            ON dt.ID = d.DomainTypeId
+        WHERE d.Status = 'Active'
         ORDER BY
-            CASE DomainType
-                WHEN 'ProjectMemory' THEN 0
-                WHEN 'Knowledge' THEN 1
-                ELSE 2
-            END,
-            DisplayName
+            CASE WHEN d.DomainCode = 'projects' THEN 0 ELSE 1 END,
+            d.DisplayOrder,
+            d.DisplayName
         """,
     )
     return [_normalize_row(row) for row in rows]
+
+
+def list_domain_types(settings: Settings) -> list[dict[str, object]]:
+    rows = fetch_all(
+        settings,
+        """
+        SELECT
+            ID,
+            CODE,
+            NAME,
+            DOMAIN_LEVEL,
+            DISPLAY_ORDER
+        FROM dbo.DomainTypes
+        WHERE
+            (EFFECTIVE_END_DATE IS NULL OR EFFECTIVE_END_DATE >= CAST(SYSDATETIME() AS date))
+        ORDER BY DISPLAY_ORDER, NAME
+        """,
+    )
+    return [_normalize_row(row) for row in rows]
+
+
+def get_domain_assist_context(settings: Settings, domain_code: str) -> dict[str, object]:
+    normalized_code = _slug_code(domain_code)
+    domains = list_domains(settings)
+    domain = next((row for row in domains if row.get("DomainCode") == normalized_code), None)
+    if domain is None:
+        raise ValueError(f"Active domain not found for code '{domain_code}'.")
+
+    domain_lookup = {
+        str(row.get("DomainId")): row
+        for row in domains
+        if row.get("DomainId")
+    }
+
+    path_parts: list[str] = []
+    current_parent_id = str(domain.get("DomainParentId") or "").strip()
+    while current_parent_id and current_parent_id in domain_lookup:
+        parent = domain_lookup[current_parent_id]
+        path_parts.insert(0, str(parent.get("DisplayName") or parent.get("DomainCode") or ""))
+        current_parent_id = str(parent.get("DomainParentId") or "").strip()
+
+    child_domains = [
+        {
+            "displayName": row.get("DisplayName"),
+            "domainCode": row.get("DomainCode"),
+            "domainType": row.get("DomainType"),
+        }
+        for row in domains
+        if str(row.get("DomainParentId") or "").strip() == str(domain.get("DomainId") or "").strip()
+    ]
+
+    collections = fetch_all(
+        settings,
+        """
+        SELECT
+            c.CollectionCode,
+            c.DisplayName,
+            c.Description,
+            COUNT(d.DocumentId) AS DocumentCount
+        FROM dbo.Collections c
+        JOIN dbo.Domains dm
+            ON dm.DomainId = c.DomainId
+        LEFT JOIN dbo.Documents d
+            ON d.CollectionId = c.CollectionId AND d.Status = 'Active'
+        WHERE dm.DomainCode = ? AND c.Status = 'Active'
+        GROUP BY
+            c.CollectionCode,
+            c.DisplayName,
+            c.Description
+        ORDER BY c.DisplayName
+        """,
+        [normalized_code],
+    )
+
+    documents = fetch_all(
+        settings,
+        """
+        SELECT TOP (25)
+            d.SourceName,
+            d.SourceType,
+            d.UpdatedAtUtc,
+            c.DisplayName AS CollectionDisplayName,
+            COUNT(cu.ContentUnitId) AS ChunkCount
+        FROM dbo.Documents d
+        JOIN dbo.Collections c
+            ON c.CollectionId = d.CollectionId
+        JOIN dbo.Domains dm
+            ON dm.DomainId = c.DomainId
+        LEFT JOIN dbo.ContentUnits cu
+            ON cu.DocumentId = d.DocumentId AND cu.Status = 'Active'
+        WHERE dm.DomainCode = ? AND d.Status = 'Active' AND c.Status = 'Active'
+        GROUP BY
+            d.SourceName,
+            d.SourceType,
+            d.UpdatedAtUtc,
+            c.DisplayName
+        ORDER BY d.UpdatedAtUtc DESC
+        """,
+        [normalized_code],
+    )
+
+    return {
+        "domain": domain,
+        "parentPath": " / ".join(path_parts),
+        "childDomains": [_normalize_row(row) for row in child_domains],
+        "collections": [_normalize_row(row) for row in collections],
+        "documents": [_normalize_row(row) for row in documents],
+    }
 
 
 def list_collections(
@@ -51,14 +161,16 @@ def list_collections(
             c.Description,
             c.Status,
             d.DomainId,
+            d.DomainParentId,
+            d.DomainTypeId,
+            d.DisplayOrder,
             d.DomainCode,
-            d.DomainType,
             d.DisplayName AS DomainDisplayName
         FROM dbo.Collections c
         JOIN dbo.Domains d
             ON d.DomainId = c.DomainId
         {where_clause}
-        ORDER BY d.DisplayName, c.DisplayName
+        ORDER BY d.DisplayOrder, d.DisplayName, c.DisplayName
         """,
         params,
     )
@@ -91,9 +203,10 @@ def list_retrieval_profiles(settings: Settings) -> list[dict[str, object]]:
 def create_domain(
     settings: Settings,
     domain_code: str,
-    domain_type: str,
+    domain_type_id: int | None,
     display_name: str,
     description: str | None = None,
+    domain_parent_id: str | None = None,
 ) -> dict[str, object]:
     domain_code = _slug_code(domain_code)
     with get_connection(settings) as conn:
@@ -101,21 +214,49 @@ def create_domain(
         cursor.execute(
             """
             INSERT INTO dbo.Domains (
+                DomainParentId,
+                DomainTypeId,
+                DisplayOrder,
                 DomainCode,
-                DomainType,
                 DisplayName,
                 Description
             )
             OUTPUT
                 inserted.DomainId,
+                inserted.DomainParentId,
+                inserted.DomainTypeId,
+                inserted.DisplayOrder,
                 inserted.DomainCode,
-                inserted.DomainType,
                 inserted.DisplayName,
                 inserted.Description,
                 inserted.Status
-            VALUES (?, ?, ?, ?)
+            VALUES (
+                ?,
+                ?,
+                (
+                    SELECT COALESCE(MAX(DisplayOrder), 0) + 10
+                    FROM dbo.Domains
+                    WHERE
+                        Status = 'Active'
+                        AND (
+                            (DomainParentId IS NULL AND ? IS NULL)
+                            OR DomainParentId = ?
+                        )
+                ),
+                ?,
+                ?,
+                ?
+            )
             """,
-            [domain_code, domain_type, display_name.strip(), description],
+            [
+                domain_parent_id,
+                domain_type_id,
+                domain_parent_id,
+                domain_parent_id,
+                domain_code,
+                display_name.strip(),
+                description,
+            ],
         )
         row = cursor.fetchone()
         conn.commit()
@@ -189,6 +330,38 @@ def update_collection(
         if row.get("CollectionCode") == _slug_code(collection_code):
             return row
     raise ValueError(f"Collection '{collection_code}' was updated but could not be reloaded.")
+
+
+def update_domain(
+    settings: Settings,
+    domain_code: str,
+    display_name: str,
+    description: str | None = None,
+    domain_type_id: int | None = None,
+) -> dict[str, object]:
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE dbo.Domains
+            SET
+                DisplayName = ?,
+                Description = ?,
+                DomainTypeId = ?,
+                UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE DomainCode = ? AND Status = 'Active'
+            """,
+            [display_name.strip(), description, domain_type_id, _slug_code(domain_code)],
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Active domain not found for code '{domain_code}'.")
+        conn.commit()
+
+    rows = list_domains(settings)
+    for row in rows:
+        if row.get("DomainCode") == _slug_code(domain_code):
+            return row
+    raise ValueError(f"Domain '{domain_code}' was updated but could not be reloaded.")
 
 
 def create_text_document(
@@ -363,13 +536,17 @@ def list_collection_documents(
             d.SourceType,
             d.Status,
             d.CreatedAtUtc,
+            d.UpdatedAtUtc,
             c.CollectionCode,
-            COUNT(cu.ContentUnitId) AS ContentUnitCount
+            COUNT(cu.ContentUnitId) AS ContentUnitCount,
+            COUNT(emb.ContentUnitId) AS EmbeddedContentUnitCount
         FROM dbo.Documents d
         JOIN dbo.Collections c
             ON c.CollectionId = d.CollectionId
         LEFT JOIN dbo.ContentUnits cu
             ON cu.DocumentId = d.DocumentId AND cu.Status = 'Active'
+        LEFT JOIN dbo.ContentUnitEmbeddings768 emb
+            ON emb.ContentUnitId = cu.ContentUnitId
         WHERE c.CollectionCode = ? AND d.Status = 'Active'
         GROUP BY
             d.DocumentId,
@@ -377,8 +554,9 @@ def list_collection_documents(
             d.SourceType,
             d.Status,
             d.CreatedAtUtc,
+            d.UpdatedAtUtc,
             c.CollectionCode
-        ORDER BY d.CreatedAtUtc DESC
+        ORDER BY d.UpdatedAtUtc DESC, d.CreatedAtUtc DESC
         """,
         [collection_code],
     )

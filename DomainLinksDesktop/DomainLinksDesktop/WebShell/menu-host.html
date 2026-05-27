@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DomainLinks Shell</title>
+  <link rel="stylesheet" href="./navigation-kit.css">
+  <style>
+    :root {
+      --nav-kit-bg: rgba(250, 248, 243, 0.96);
+      --nav-kit-surface: rgba(255, 255, 255, 0.99);
+      --nav-kit-line: #d9d0c3;
+      --nav-kit-text: #18344a;
+      --nav-kit-muted: #5b6770;
+      --nav-kit-muted-strong: #365268;
+      --nav-kit-shadow: 0 18px 50px rgba(24, 52, 74, 0.12);
+      --nav-kit-container: 1320px;
+    }
+
+    html, body {
+      margin: 0;
+      background: transparent;
+      font-family: "Segoe UI", Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    body {
+      padding: 0;
+    }
+
+    .nav-kit {
+      position: static;
+      border: 1px solid #d6d0c4;
+      border-radius: 6px;
+      overflow: visible;
+    }
+
+    .nav-kit__shell {
+      width: min(calc(100% - 24px), var(--nav-kit-container));
+      min-height: 66px;
+    }
+
+    .nav-kit__brand-mark {
+      background: #18344a;
+    }
+
+    .nav-kit__action--primary {
+      background: #18344a;
+    }
+
+    .nav-kit__action--primary:hover {
+      background: #224760;
+    }
+  </style>
+</head>
+<body>
+  <div id="menu-root"></div>
+
+  <script src="./navigation-kit.global.js"></script>
+  <script>
+    (function () {
+      const mount = document.getElementById("menu-root");
+      if (!mount || !window.NavigationKit) {
+        return;
+      }
+
+      const config = {
+        brand: {
+          label: "DomainLinks",
+          href: "action://show-projects",
+          mark: "D"
+        },
+        items: [
+          {
+            type: "panel",
+            id: "workspace",
+            label: "Workspace",
+            groups: [
+              {
+                label: "Navigate",
+                links: [
+                  {
+                    label: "Projects Home",
+                    href: "action://show-projects",
+                    description: "Return to the active project collection",
+                    icon: "PR"
+                  },
+                  {
+                    label: "Capability Domains",
+                    href: "action://focus-knowledge",
+                    description: "Jump to the capability-domain context tree",
+                    icon: "KN"
+                  },
+                  {
+                    label: "Domain Store",
+                    href: "action://open-domain-store",
+                    description: "Open the domain and RAG curation workspace",
+                    icon: "DS"
+                  },
+                  {
+                    label: "Prompt Box",
+                    href: "action://focus-prompt",
+                    description: "Put the cursor in the main prompt input",
+                    icon: "PM"
+                  }
+                ]
+              },
+              {
+                label: "Create",
+                featured: true,
+                links: [
+                  {
+                    label: "New Project",
+                    href: "action://new-project",
+                    description: "Create a new short-memory project root",
+                    icon: "NP"
+                  },
+                  {
+                    label: "New Chat",
+                    href: "action://new-chat",
+                    description: "Start a new child chat under the current project",
+                    icon: "NC"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            type: "panel",
+            id: "tools",
+            label: "Tools",
+            groups: [
+              {
+                label: "AI Tools",
+                links: [
+                  {
+                    label: "OCR Viewer",
+                    href: "action://open-ocr-viewer",
+                    description: "Open the isolated DeepSeek OCR workspace",
+                    icon: "OC",
+                    badge: "New"
+                  },
+                  {
+                    label: "Ask",
+                    href: "action://ask",
+                    description: "Run the current prompt against the selected context",
+                    icon: "AI"
+                  }
+                ]
+              },
+              {
+                label: "Desktop",
+                featured: true,
+                links: [
+                  {
+                    label: "Save Thread",
+                    href: "action://save-thread",
+                    description: "Export the current chat thread",
+                    icon: "SV"
+                  },
+                  {
+                    label: "Toggle Status",
+                    href: "action://toggle-status",
+                    description: "Expand or collapse backend and Ollama status",
+                    icon: "ST"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            type: "link",
+            label: "OCR",
+            href: "action://open-ocr-viewer"
+          }
+        ],
+        actions: [
+          { label: "Domain Store", href: "action://open-domain-store" },
+          { label: "New Chat", href: "action://new-chat" },
+          { label: "Run Ask", href: "action://ask", variant: "primary" }
+        ]
+      };
+
+      window.NavigationKit.createNavigationKit({
+        mount,
+        variant: "top",
+        config
+      });
+
+      mount.addEventListener("click", (event) => {
+        const link = event.target.closest("a[href]");
+        if (!link) {
+          return;
+        }
+
+        const href = link.getAttribute("href") || "";
+        if (!href.startsWith("action://")) {
+          return;
+        }
+
+        event.preventDefault();
+        const action = href.slice("action://".length);
+        if (window.chrome && window.chrome.webview) {
+          window.chrome.webview.postMessage({ type: "shell-action", action });
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

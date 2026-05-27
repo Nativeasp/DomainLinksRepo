@@ -1,0 +1,66 @@
+<Window x:Class="DomainLinksDesktop.TextPromptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Text Prompt"
+        Height="210"
+        Width="480"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#F3F1EC">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="PromptTextBlock"
+                   FontSize="14"
+                   FontWeight="SemiBold"
+                   Foreground="#263746"
+                   Text="Enter a value" />
+
+        <TextBlock Grid.Row="2"
+                   x:Name="HintTextBlock"
+                   Foreground="#5B6770"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed" />
+
+        <TextBox Grid.Row="4"
+                 x:Name="ValueTextBox"
+                 Height="34"
+                 Padding="8,6"
+                 VerticalContentAlignment="Center"
+                 Background="#FFFFFF"
+                 BorderBrush="#CDBFAF"
+                 BorderThickness="1"
+                 KeyDown="ValueTextBox_OnKeyDown" />
+
+        <TextBlock Grid.Row="5"
+                   x:Name="ValidationTextBlock"
+                   Margin="0,8,0,0"
+                   Foreground="#B42318"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed" />
+
+        <StackPanel Grid.Row="6"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Width="92"
+                    Height="32"
+                    Margin="0,0,10,0"
+                    Click="CancelButton_OnClick"
+                    Content="Cancel" />
+            <Button Width="92"
+                    Height="32"
+                    Click="OkButton_OnClick"
+                    Background="#18344A"
+                    Foreground="#FFFFFF"
+                    Content="OK" />
+        </StackPanel>
+    </Grid>
+</Window>
