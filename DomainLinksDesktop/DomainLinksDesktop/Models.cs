@@ -10,14 +10,18 @@ public sealed class DomainItem : INotifyPropertyChanged
     private string _domainId = string.Empty;
     private string _domainParentId = string.Empty;
     private int? _domainTypeId;
+    private int? _domainOrientationId;
     private int _displayOrder;
     private string _domainCode = string.Empty;
     private string _domainType = string.Empty;
+    private string _domainOrientationCode = string.Empty;
+    private string _domainOrientation = string.Empty;
     private string _displayName = string.Empty;
     private string _description = string.Empty;
     private string _status = string.Empty;
     private bool? _isIncluded;
     private bool _isExpanded;
+    private bool _isSelected;
 
     public string DomainId
     {
@@ -37,6 +41,12 @@ public sealed class DomainItem : INotifyPropertyChanged
         set => SetField(ref _domainTypeId, value);
     }
 
+    public int? DomainOrientationId
+    {
+        get => _domainOrientationId;
+        set => SetField(ref _domainOrientationId, value);
+    }
+
     public int DisplayOrder
     {
         get => _displayOrder;
@@ -53,6 +63,18 @@ public sealed class DomainItem : INotifyPropertyChanged
     {
         get => _domainType;
         set => SetField(ref _domainType, value);
+    }
+
+    public string DomainOrientationCode
+    {
+        get => _domainOrientationCode;
+        set => SetField(ref _domainOrientationCode, value);
+    }
+
+    public string DomainOrientation
+    {
+        get => _domainOrientation;
+        set => SetField(ref _domainOrientation, value);
     }
 
     public string DisplayName
@@ -82,6 +104,12 @@ public sealed class DomainItem : INotifyPropertyChanged
     {
         get => _isExpanded;
         set => SetField(ref _isExpanded, value);
+    }
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetField(ref _isSelected, value);
     }
 
     [JsonIgnore]
@@ -120,6 +148,15 @@ public sealed class DomainTypeItem
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public int DomainLevel { get; set; }
+    public int DisplayOrder { get; set; }
+}
+
+public sealed class DomainOrientationItem
+{
+    public int Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
     public int DisplayOrder { get; set; }
 }
 
@@ -384,6 +421,20 @@ public sealed class DomainAssistResponse
     public string Answer { get; set; } = string.Empty;
     public string SystemPromptLabel { get; set; } = string.Empty;
     public AskResponseMetrics? Metrics { get; set; }
+}
+
+public sealed class DomainDeletePreviewResponse
+{
+    public string DomainCode { get; set; } = string.Empty;
+    public int DomainCount { get; set; }
+    public int CollectionCount { get; set; }
+    public int DocumentCount { get; set; }
+}
+
+public sealed class CollectionDeletePreviewResponse
+{
+    public string CollectionCode { get; set; } = string.Empty;
+    public int DocumentCount { get; set; }
 }
 
 public sealed class ChatResponseStats

@@ -13,11 +13,14 @@ from .db import ping_database
 from .document_ingest import extract_pdf_text
 from .repositories import (
     archive_document,
-    archive_collection,
     create_collection,
     create_domain,
     create_text_document,
+    delete_collection,
+    delete_domain,
     delete_content_unit,
+    get_collection_delete_preview,
+    get_domain_delete_preview,
     get_recent_context_units,
     get_domain_assist_context,
     has_user_chat_backup_files,
@@ -25,7 +28,9 @@ from .repositories import (
     list_document_chunks,
     list_collections,
     list_domains,
+    list_domain_orientations,
     list_domain_types,
+    reorder_root_domains,
     list_retrieval_profiles,
     list_user_chat_backup_files,
     mark_user_chat_backup_files_restored,
@@ -39,6 +44,7 @@ from .repositories import (
 class CreateDomainRequest(BaseModel):
     domainCode: str
     domainTypeId: int | None = None
+    domainOrientationId: int | None = None
     domainParentId: str | None = None
     displayName: str
     description: str | None = None
@@ -67,6 +73,13 @@ class UpdateDomainRequest(BaseModel):
     displayName: str
     description: str | None = None
     domainTypeId: int | None = None
+    domainOrientationId: int | None = None
+
+
+class ReorderDomainSiblingsRequest(BaseModel):
+    parentDomainId: str | None = None
+    orientationCode: str | None = None
+    orderedDomainCodes: list[str]
 
 
 class DomainAssistRequest(BaseModel):
@@ -293,12 +306,17 @@ def create_app() -> FastAPI:
     def domain_types() -> list[dict[str, object]]:
         return list_domain_types(settings)
 
+    @app.get("/domain-orientations")
+    def domain_orientations() -> list[dict[str, object]]:
+        return list_domain_orientations(settings)
+
     @app.post("/domains")
     def add_domain(request: CreateDomainRequest) -> dict[str, object]:
         return create_domain(
             settings,
             domain_code=request.domainCode,
             domain_type_id=request.domainTypeId,
+            domain_orientation_id=request.domainOrientationId,
             display_name=request.displayName,
             description=request.description,
             domain_parent_id=request.domainParentId,
@@ -312,7 +330,25 @@ def create_app() -> FastAPI:
             display_name=request.displayName,
             description=request.description,
             domain_type_id=request.domainTypeId,
+            domain_orientation_id=request.domainOrientationId,
         )
+
+    @app.put("/domain-sibling-order")
+    def reorder_domains(request: ReorderDomainSiblingsRequest) -> dict[str, object]:
+        return reorder_root_domains(
+            settings,
+            parent_domain_id=request.parentDomainId,
+            orientation_code=request.orientationCode,
+            ordered_domain_codes=request.orderedDomainCodes,
+        )
+
+    @app.get("/domains/{domainCode}/delete-preview")
+    def domain_delete_preview(domainCode: str) -> dict[str, object]:
+        return get_domain_delete_preview(settings, domainCode)
+
+    @app.delete("/domains/{domainCode}")
+    def remove_domain(domainCode: str) -> dict[str, object]:
+        return delete_domain(settings, domainCode)
 
     @app.post("/domains/assist")
     def assist_domain(request: DomainAssistRequest) -> dict[str, object]:
@@ -354,10 +390,13 @@ def create_app() -> FastAPI:
             description=request.description,
         )
 
+    @app.get("/collections/{collectionCode}/delete-preview")
+    def collection_delete_preview(collectionCode: str) -> dict[str, object]:
+        return get_collection_delete_preview(settings, collectionCode)
+
     @app.delete("/collections/{collectionCode}")
-    def delete_collection(collectionCode: str) -> dict[str, object]:
-        archive_collection(settings, collectionCode)
-        return {"status": "archived", "collectionCode": collectionCode}
+    def remove_collection(collectionCode: str) -> dict[str, object]:
+        return delete_collection(settings, collectionCode)
 
     @app.post("/documents/text")
     def add_text_document(request: CreateTextDocumentRequest) -> dict[str, object]:

@@ -21,23 +21,14 @@ BEGIN
         VALUES ('governance', 'Knowledge', 'Governance', 'Durable governance, board, and policy materials.');
     END;
 
-    IF NOT EXISTS (SELECT 1 FROM dbo.Domains WHERE DomainCode = 'strategy')
-    BEGIN
-        INSERT INTO dbo.Domains (DomainCode, DomainType, DisplayName, Description)
-        VALUES ('strategy', 'Knowledge', 'Strategy', 'Durable strategic planning and operating context.');
-    END;
-
     DECLARE @ProjectsDomainId UNIQUEIDENTIFIER =
-        (SELECT DomainId FROM dbo.Domains WHERE DomainCode = 'projects');
+        (SELECT DomainId FROM dbo.Domains WHERE DomainCode = 'workspace-memory');
     DECLARE @HrDomainId UNIQUEIDENTIFIER =
         (SELECT DomainId FROM dbo.Domains WHERE DomainCode = 'hr');
     DECLARE @FinanceDomainId UNIQUEIDENTIFIER =
         (SELECT DomainId FROM dbo.Domains WHERE DomainCode = 'finance');
     DECLARE @GovernanceDomainId UNIQUEIDENTIFIER =
         (SELECT DomainId FROM dbo.Domains WHERE DomainCode = 'governance');
-    DECLARE @StrategyDomainId UNIQUEIDENTIFIER =
-        (SELECT DomainId FROM dbo.Domains WHERE DomainCode = 'strategy');
-
     IF @ProjectsDomainId IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM dbo.Collections WHERE CollectionCode = 'hire-request-new-dba')
     BEGIN
@@ -83,18 +74,6 @@ BEGIN
             'board-governance',
             'Board Governance',
             'Board structure, governance policy, and committee guidance.'
-        );
-    END;
-
-    IF @StrategyDomainId IS NOT NULL
-       AND NOT EXISTS (SELECT 1 FROM dbo.Collections WHERE CollectionCode = 'strategic-planning')
-    BEGIN
-        INSERT INTO dbo.Collections (DomainId, CollectionCode, DisplayName, Description)
-        VALUES (
-            @StrategyDomainId,
-            'strategic-planning',
-            'Strategic Planning',
-            'Strategy memos, planning context, and priority framing.'
         );
     END;
 

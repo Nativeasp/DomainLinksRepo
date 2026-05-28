@@ -7,7 +7,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.UserChatBackupFiles (
             UserChatBackupFileId         UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_UserChatBackupFiles_Id DEFAULT (NEWID()),
+                CONSTRAINT DF_UserChatBackupFiles_Id DEFAULT (NEWSEQUENTIALID()),
             AppUserId                    UNIQUEIDENTIFIER NOT NULL,
             RootCollectionCode           NVARCHAR(100) NOT NULL,
             RootDisplayName              NVARCHAR(255) NOT NULL,

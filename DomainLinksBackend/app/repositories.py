@@ -14,20 +14,42 @@ def list_domains(settings: Settings) -> list[dict[str, object]]:
             d.DomainId,
             d.DomainParentId,
             d.DomainTypeId,
+            d.DomainOrientationId,
             d.DisplayOrder,
             d.DomainCode,
             d.DisplayName,
             d.Description,
             d.Status,
-            dt.NAME AS DomainType
+            dt.NAME AS DomainType,
+            dor.CODE AS DomainOrientationCode,
+            dor.NAME AS DomainOrientation
         FROM dbo.Domains d
         LEFT JOIN dbo.DomainTypes dt
             ON dt.ID = d.DomainTypeId
+        LEFT JOIN dbo.DomainOrientations dor
+            ON dor.ID = d.DomainOrientationId
         WHERE d.Status = 'Active'
         ORDER BY
-            CASE WHEN d.DomainCode = 'projects' THEN 0 ELSE 1 END,
+            CASE WHEN d.DomainCode = 'workspace-memory' THEN 0 ELSE 1 END,
             d.DisplayOrder,
             d.DisplayName
+        """,
+    )
+    return [_normalize_row(row) for row in rows]
+
+
+def list_domain_orientations(settings: Settings) -> list[dict[str, object]]:
+    rows = fetch_all(
+        settings,
+        """
+        SELECT
+            ID,
+            CODE,
+            NAME,
+            DESCRIPTION,
+            DISPLAY_ORDER
+        FROM dbo.DomainOrientations
+        ORDER BY DISPLAY_ORDER, NAME
         """,
     )
     return [_normalize_row(row) for row in rows]
@@ -200,10 +222,79 @@ def list_retrieval_profiles(settings: Settings) -> list[dict[str, object]]:
     return [_normalize_row(row) for row in rows]
 
 
+def reorder_root_domains(
+    settings: Settings,
+    parent_domain_id: str | None,
+    orientation_code: str | None,
+    ordered_domain_codes: list[str],
+) -> dict[str, object]:
+    normalized_parent_domain_id = (parent_domain_id or "").strip() or None
+    normalized_orientation_code = (
+        _slug_code(orientation_code).replace("-", "_").upper()
+        if orientation_code and orientation_code.strip()
+        else None
+    )
+    normalized_codes = [_slug_code(code) for code in ordered_domain_codes if code.strip()]
+    if not normalized_codes:
+        raise ValueError("At least one root domain code is required to reorder domains.")
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                d.DomainId,
+                d.DomainCode,
+                d.DomainParentId,
+                dor.CODE AS DomainOrientationCode
+            FROM dbo.Domains d
+            LEFT JOIN dbo.DomainOrientations dor
+                ON dor.ID = d.DomainOrientationId
+            WHERE d.Status = 'Active'
+              AND d.DomainCode IN ({placeholders})
+            """.format(placeholders=", ".join("?" for _ in normalized_codes)),
+            normalized_codes,
+        )
+        domain_rows = [_normalize_row(_row_to_dict(cursor, row)) for row in cursor.fetchall()]
+        if len(domain_rows) != len(normalized_codes):
+            found_codes = {str(row.get("DomainCode") or "") for row in domain_rows}
+            missing_codes = [code for code in normalized_codes if code not in found_codes]
+            raise ValueError(f"Domains not found for reorder: {', '.join(missing_codes)}.")
+
+        for row in domain_rows:
+            row_parent_id = str(row.get("DomainParentId") or "").strip() or None
+            if row_parent_id != normalized_parent_domain_id:
+                raise ValueError("All reordered domains must belong to the same parent.")
+            if normalized_orientation_code and str(row.get("DomainOrientationCode") or "").upper() != normalized_orientation_code:
+                raise ValueError("All reordered domains must belong to the same orientation.")
+
+        for index, domain_code in enumerate(normalized_codes, start=1):
+            cursor.execute(
+                """
+                UPDATE dbo.Domains
+                SET
+                    DisplayOrder = ?,
+                    UpdatedAtUtc = SYSUTCDATETIME()
+                WHERE DomainCode = ? AND Status = 'Active'
+                """,
+                [index * 10, domain_code],
+            )
+
+        conn.commit()
+
+    return {
+        "status": "reordered",
+        "parentDomainId": normalized_parent_domain_id,
+        "orientationCode": normalized_orientation_code,
+        "domainCodes": normalized_codes,
+    }
+
+
 def create_domain(
     settings: Settings,
     domain_code: str,
     domain_type_id: int | None,
+    domain_orientation_id: int | None,
     display_name: str,
     description: str | None = None,
     domain_parent_id: str | None = None,
@@ -216,6 +307,7 @@ def create_domain(
             INSERT INTO dbo.Domains (
                 DomainParentId,
                 DomainTypeId,
+                DomainOrientationId,
                 DisplayOrder,
                 DomainCode,
                 DisplayName,
@@ -225,12 +317,14 @@ def create_domain(
                 inserted.DomainId,
                 inserted.DomainParentId,
                 inserted.DomainTypeId,
+                inserted.DomainOrientationId,
                 inserted.DisplayOrder,
                 inserted.DomainCode,
                 inserted.DisplayName,
                 inserted.Description,
                 inserted.Status
             VALUES (
+                ?,
                 ?,
                 ?,
                 (
@@ -251,6 +345,7 @@ def create_domain(
             [
                 domain_parent_id,
                 domain_type_id,
+                domain_orientation_id,
                 domain_parent_id,
                 domain_parent_id,
                 domain_code,
@@ -338,6 +433,7 @@ def update_domain(
     display_name: str,
     description: str | None = None,
     domain_type_id: int | None = None,
+    domain_orientation_id: int | None = None,
 ) -> dict[str, object]:
     with get_connection(settings) as conn:
         cursor = conn.cursor()
@@ -348,10 +444,11 @@ def update_domain(
                 DisplayName = ?,
                 Description = ?,
                 DomainTypeId = ?,
+                DomainOrientationId = ?,
                 UpdatedAtUtc = SYSUTCDATETIME()
             WHERE DomainCode = ? AND Status = 'Active'
             """,
-            [display_name.strip(), description, domain_type_id, _slug_code(domain_code)],
+            [display_name.strip(), description, domain_type_id, domain_orientation_id, _slug_code(domain_code)],
         )
         if cursor.rowcount == 0:
             raise ValueError(f"Active domain not found for code '{domain_code}'.")
@@ -362,6 +459,339 @@ def update_domain(
         if row.get("DomainCode") == _slug_code(domain_code):
             return row
     raise ValueError(f"Domain '{domain_code}' was updated but could not be reloaded.")
+
+
+def get_domain_delete_preview(
+    settings: Settings,
+    domain_code: str,
+) -> dict[str, object]:
+    normalized_domain_code = _slug_code(domain_code)
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            WITH DomainTree AS (
+                SELECT
+                    DomainId,
+                    DomainCode,
+                    CAST(0 AS INT) AS Depth
+                FROM dbo.Domains
+                WHERE DomainCode = ? AND Status = 'Active'
+
+                UNION ALL
+
+                SELECT
+                    d.DomainId,
+                    d.DomainCode,
+                    dt.Depth + 1
+                FROM dbo.Domains d
+                JOIN DomainTree dt
+                    ON d.DomainParentId = dt.DomainId
+                WHERE d.Status = 'Active'
+            )
+            SELECT DomainId, DomainCode, Depth
+            FROM DomainTree
+            """,
+            [normalized_domain_code],
+        )
+        domain_rows = [_row_to_dict(cursor, row) for row in cursor.fetchall()]
+        if not domain_rows:
+            raise ValueError(f"Active domain not found for code '{domain_code}'.")
+
+        domain_ids = [str(row["DomainId"]) for row in domain_rows]
+        domain_id_placeholders = ", ".join("?" for _ in domain_ids)
+
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS CollectionCount
+            FROM dbo.Collections
+            WHERE DomainId IN ({domain_id_placeholders})
+            """,
+            domain_ids,
+        )
+        collection_count = int(cursor.fetchone()[0] or 0)
+
+        cursor.execute(
+            f"""
+            SELECT COUNT(*) AS DocumentCount
+            FROM dbo.Documents d
+            JOIN dbo.Collections c
+                ON c.CollectionId = d.CollectionId
+            WHERE c.DomainId IN ({domain_id_placeholders})
+            """,
+            domain_ids,
+        )
+        document_count = int(cursor.fetchone()[0] or 0)
+
+    return {
+        "domainCode": normalized_domain_code,
+        "domainCount": len(domain_rows),
+        "collectionCount": collection_count,
+        "documentCount": document_count,
+    }
+
+
+def get_collection_delete_preview(
+    settings: Settings,
+    collection_code: str,
+) -> dict[str, object]:
+    normalized_collection_code = _slug_code(collection_code)
+
+    row = fetch_one(
+        settings,
+        """
+        SELECT
+            c.CollectionCode,
+            COUNT(d.DocumentId) AS DocumentCount
+        FROM dbo.Collections c
+        LEFT JOIN dbo.Documents d
+            ON d.CollectionId = c.CollectionId
+        WHERE c.CollectionCode = ? AND c.Status = 'Active'
+        GROUP BY c.CollectionCode
+        """,
+        [normalized_collection_code],
+    )
+    if row is None:
+        raise ValueError(f"Active collection not found for code '{collection_code}'.")
+
+    normalized_row = _normalize_row(row)
+    return {
+        "collectionCode": normalized_row.get("CollectionCode") or normalized_collection_code,
+        "documentCount": int(normalized_row.get("DocumentCount") or 0),
+    }
+
+
+def delete_domain(
+    settings: Settings,
+    domain_code: str,
+) -> dict[str, object]:
+    normalized_domain_code = _slug_code(domain_code)
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            WITH DomainTree AS (
+                SELECT
+                    DomainId,
+                    DomainCode,
+                    CAST(0 AS INT) AS Depth
+                FROM dbo.Domains
+                WHERE DomainCode = ? AND Status = 'Active'
+
+                UNION ALL
+
+                SELECT
+                    d.DomainId,
+                    d.DomainCode,
+                    dt.Depth + 1
+                FROM dbo.Domains d
+                JOIN DomainTree dt
+                    ON d.DomainParentId = dt.DomainId
+                WHERE d.Status = 'Active'
+            )
+            SELECT DomainId, DomainCode, Depth
+            FROM DomainTree
+            """,
+            [normalized_domain_code],
+        )
+        domain_rows = [_row_to_dict(cursor, row) for row in cursor.fetchall()]
+        if not domain_rows:
+            raise ValueError(f"Active domain not found for code '{domain_code}'.")
+
+        domain_ids = [str(row["DomainId"]) for row in domain_rows]
+        domain_id_placeholders = ", ".join("?" for _ in domain_ids)
+
+        cursor.execute(
+            f"""
+            SELECT CollectionId, CollectionCode
+            FROM dbo.Collections
+            WHERE DomainId IN ({domain_id_placeholders})
+            """,
+            domain_ids,
+        )
+        collection_rows = [_row_to_dict(cursor, row) for row in cursor.fetchall()]
+        collection_ids = [str(row["CollectionId"]) for row in collection_rows]
+        has_legacy_chroma_table = _table_exists(cursor, "dbo.LegacyChromaMigrationState")
+        has_domain_cluster_members_table = _table_exists(cursor, "dbo.DomainClusterMembers")
+
+        if collection_ids:
+            collection_id_placeholders = ", ".join("?" for _ in collection_ids)
+
+            cursor.execute(
+                f"""
+                DELETE emb
+                FROM dbo.ContentUnitEmbeddings768 emb
+                JOIN dbo.ContentUnits cu
+                    ON cu.ContentUnitId = emb.ContentUnitId
+                JOIN dbo.Documents d
+                    ON d.DocumentId = cu.DocumentId
+                WHERE d.CollectionId IN ({collection_id_placeholders})
+                """,
+                collection_ids,
+            )
+
+            if has_legacy_chroma_table:
+                cursor.execute(
+                    f"""
+                    DELETE FROM dbo.LegacyChromaMigrationState
+                    WHERE CollectionId IN ({collection_id_placeholders})
+                    """,
+                    collection_ids,
+                )
+
+            cursor.execute(
+                f"""
+                DELETE cu
+                FROM dbo.ContentUnits cu
+                JOIN dbo.Documents d
+                    ON d.DocumentId = cu.DocumentId
+                WHERE d.CollectionId IN ({collection_id_placeholders})
+                """,
+                collection_ids,
+            )
+
+            cursor.execute(
+                f"""
+                DELETE FROM dbo.Documents
+                WHERE CollectionId IN ({collection_id_placeholders})
+                """,
+                collection_ids,
+            )
+
+            cursor.execute(
+                f"""
+                DELETE FROM dbo.Collections
+                WHERE CollectionId IN ({collection_id_placeholders})
+                """,
+                collection_ids,
+            )
+
+        if has_legacy_chroma_table and _column_exists(cursor, "dbo.LegacyChromaMigrationState", "DomainId"):
+            cursor.execute(
+                f"""
+                DELETE FROM dbo.LegacyChromaMigrationState
+                WHERE DomainId IN ({domain_id_placeholders})
+                """,
+                domain_ids,
+            )
+
+        if has_domain_cluster_members_table:
+            cursor.execute(
+                f"""
+                DELETE FROM dbo.DomainClusterMembers
+                WHERE DomainId IN ({domain_id_placeholders})
+                """,
+                domain_ids,
+            )
+
+        for domain_row in sorted(domain_rows, key=lambda item: int(item["Depth"]), reverse=True):
+            cursor.execute(
+                "DELETE FROM dbo.Domains WHERE DomainId = ?",
+                [str(domain_row["DomainId"])],
+            )
+
+        conn.commit()
+
+    return {
+        "status": "deleted",
+        "domainCode": normalized_domain_code,
+        "deletedDomainCount": len(domain_rows),
+        "deletedCollectionCount": len(collection_rows),
+    }
+
+
+def delete_collection(
+    settings: Settings,
+    collection_code: str,
+) -> dict[str, object]:
+    normalized_collection_code = _slug_code(collection_code)
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT CollectionId, CollectionCode
+            FROM dbo.Collections
+            WHERE CollectionCode = ? AND Status = 'Active'
+            """,
+            [normalized_collection_code],
+        )
+        collection_row = cursor.fetchone()
+        if collection_row is None:
+            raise ValueError(f"Active collection not found for code '{collection_code}'.")
+
+        collection = _row_to_dict(cursor, collection_row)
+        collection_id = str(collection["CollectionId"])
+        has_legacy_chroma_table = _table_exists(cursor, "dbo.LegacyChromaMigrationState")
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS DocumentCount
+            FROM dbo.Documents
+            WHERE CollectionId = ?
+            """,
+            [collection_id],
+        )
+        document_count = int(cursor.fetchone()[0] or 0)
+
+        cursor.execute(
+            """
+            DELETE emb
+            FROM dbo.ContentUnitEmbeddings768 emb
+            JOIN dbo.ContentUnits cu
+                ON cu.ContentUnitId = emb.ContentUnitId
+            JOIN dbo.Documents d
+                ON d.DocumentId = cu.DocumentId
+            WHERE d.CollectionId = ?
+            """,
+            [collection_id],
+        )
+
+        if has_legacy_chroma_table:
+            cursor.execute(
+                """
+                DELETE FROM dbo.LegacyChromaMigrationState
+                WHERE CollectionId = ?
+                """,
+                [collection_id],
+            )
+
+        cursor.execute(
+            """
+            DELETE cu
+            FROM dbo.ContentUnits cu
+            JOIN dbo.Documents d
+                ON d.DocumentId = cu.DocumentId
+            WHERE d.CollectionId = ?
+            """,
+            [collection_id],
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM dbo.Documents
+            WHERE CollectionId = ?
+            """,
+            [collection_id],
+        )
+
+        cursor.execute(
+            """
+            DELETE FROM dbo.Collections
+            WHERE CollectionId = ?
+            """,
+            [collection_id],
+        )
+
+        conn.commit()
+
+    return {
+        "status": "deleted",
+        "collectionCode": normalized_collection_code,
+        "deletedDocumentCount": document_count,
+    }
 
 
 def create_text_document(
@@ -978,6 +1408,16 @@ def _slug_code(value: str) -> str:
     if not code:
         raise ValueError("Code must contain at least one letter or digit.")
     return code[:100]
+
+
+def _table_exists(cursor, full_table_name: str) -> bool:
+    cursor.execute("SELECT OBJECT_ID(?, 'U')", [full_table_name])
+    return cursor.fetchone()[0] is not None
+
+
+def _column_exists(cursor, full_table_name: str, column_name: str) -> bool:
+    cursor.execute("SELECT COL_LENGTH(?, ?)", [full_table_name, column_name])
+    return cursor.fetchone()[0] is not None
 
 
 def _chunk_text(text: str, chunk_size: int = 1200, overlap: int = 150) -> list[str]:

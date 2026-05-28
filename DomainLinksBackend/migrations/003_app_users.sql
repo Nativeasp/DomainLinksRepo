@@ -7,7 +7,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.AppUsers (
             AppUserId           UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_AppUsers_AppUserId DEFAULT (NEWID()),
+                CONSTRAINT DF_AppUsers_AppUserId DEFAULT (NEWSEQUENTIALID()),
             IdentityProvider    NVARCHAR(30) NOT NULL
                 CONSTRAINT DF_AppUsers_IdentityProvider DEFAULT ('Windows'),
             WindowsUserName     NVARCHAR(256) NOT NULL,

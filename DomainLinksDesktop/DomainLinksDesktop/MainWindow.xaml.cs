@@ -110,6 +110,7 @@ public partial class MainWindow : Window
         ResponseWebView.CoreWebView2.WebMessageReceived += ResponseWebView_OnWebMessageReceived;
         ShowEmptyResponseState("Response output will appear here.");
         await LoadShellAsync();
+        Dispatcher.BeginInvoke(new Action(OpenDomainStore), DispatcherPriority.Background);
     }
 
     private void MainWindow_OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -721,7 +722,7 @@ public partial class MainWindow : Window
         SetCenterMode(isRootMode: true);
         CollectionHeaderTextBlock.Text = $"Collection: {activeCollection.DisplayName}";
         CollectionDetailTextBlock.Text = string.IsNullOrWhiteSpace(activeCollection.Description)
-            ? $"Upload into collection code '{activeCollection.CollectionCode}' and chat against this short-memory scope."
+            ? $"Upload into collection code '{activeCollection.CollectionCode}' and chat against this Workspace Memory scope."
             : activeCollection.Description;
         var documents = await LoadDocumentsAsync(activeCollection.CollectionCode);
         CollectionContentsListBox.ItemsSource = documents.Count == 0
@@ -1012,10 +1013,10 @@ public partial class MainWindow : Window
                 "/collections",
                 new
                 {
-                    domainCode = "projects",
+                    domainCode = "workspace-memory",
                     collectionCode = displayName,
                     displayName,
-                    description = "New short-memory project collection.",
+                    description = "New Workspace Memory collection.",
                 }
             );
             response.EnsureSuccessStatusCode();
@@ -1703,7 +1704,7 @@ public partial class MainWindow : Window
 
         foreach (var domain in domains
                      .Where(domain =>
-                         !string.Equals(domain.DomainCode, "projects", StringComparison.OrdinalIgnoreCase)
+                         !string.Equals(domain.DomainCode, "workspace-memory", StringComparison.OrdinalIgnoreCase)
                          && string.IsNullOrWhiteSpace(domain.DomainParentId))
                      .OrderBy(domain => domain.DisplayOrder)
                      .ThenBy(domain => domain.DisplayName, StringComparer.OrdinalIgnoreCase))
@@ -1712,7 +1713,7 @@ public partial class MainWindow : Window
         }
 
         foreach (var collection in collections
-                     .Where(collection => string.Equals(collection.DomainCode, "projects", StringComparison.OrdinalIgnoreCase))
+                     .Where(collection => string.Equals(collection.DomainCode, "workspace-memory", StringComparison.OrdinalIgnoreCase))
                      .OrderBy(collection => collection.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             collection.IsExpanded = true;

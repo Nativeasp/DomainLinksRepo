@@ -13,13 +13,42 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM dbo.SchemaMigrations WHERE MigrationId = '001_initial_schema')
 BEGIN
+    IF OBJECT_ID('dbo.DomainTypes', 'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.DomainTypes (
+            ID                    int IDENTITY(1,1) NOT NULL,
+            CODE                  nvarchar(50) NOT NULL,
+            NAME                  nvarchar(100) NOT NULL,
+            DOMAIN_LEVEL          int NOT NULL,
+            PRIMARY_FOCUS         nvarchar(500) NOT NULL,
+            KEY_QUESTION          nvarchar(200) NOT NULL,
+            DESCRIPTION           nvarchar(500) NULL,
+            DISPLAY_ORDER         int NOT NULL,
+            EFFECTIVE_START_DATE  date NULL,
+            EFFECTIVE_END_DATE    date NULL,
+            CREATED_DATE          datetime2 NOT NULL
+                CONSTRAINT DF_DomainTypes_CREATED_DATE DEFAULT (SYSDATETIME()),
+            CREATED_BY            nvarchar(128) NOT NULL
+                CONSTRAINT DF_DomainTypes_CREATED_BY DEFAULT (SUSER_SNAME()),
+            UPDATED_DATE          datetime2 NULL,
+            UPDATED_BY            nvarchar(128) NULL,
+            CONSTRAINT PK_DomainTypes PRIMARY KEY CLUSTERED (ID),
+            CONSTRAINT UQ_DomainTypes_CODE UNIQUE (CODE),
+            CONSTRAINT UQ_DomainTypes_DOMAIN_LEVEL UNIQUE (DOMAIN_LEVEL),
+            CONSTRAINT CK_DomainTypes_DOMAIN_LEVEL CHECK (DOMAIN_LEVEL BETWEEN 1 AND 3)
+        );
+    END;
+
     IF OBJECT_ID('dbo.Domains', 'U') IS NULL
     BEGIN
         CREATE TABLE dbo.Domains (
             DomainId           UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_Domains_DomainId DEFAULT (NEWID()),
+                CONSTRAINT DF_Domains_DomainId DEFAULT (NEWSEQUENTIALID()),
+            DomainParentId     UNIQUEIDENTIFIER NULL,
+            DomainTypeId       INT NULL,
+            DisplayOrder       INT NOT NULL
+                CONSTRAINT DF_Domains_DisplayOrder DEFAULT (0),
             DomainCode         NVARCHAR(100) NOT NULL,
-            DomainType         NVARCHAR(40) NOT NULL,
             DisplayName        NVARCHAR(255) NOT NULL,
             Description        NVARCHAR(MAX) NULL,
             Status             NVARCHAR(30) NOT NULL
@@ -30,18 +59,26 @@ BEGIN
                 CONSTRAINT DF_Domains_UpdatedAtUtc DEFAULT (SYSUTCDATETIME()),
             CONSTRAINT PK_Domains PRIMARY KEY (DomainId),
             CONSTRAINT UQ_Domains_DomainCode UNIQUE (DomainCode),
-            CONSTRAINT CK_Domains_DomainType
-                CHECK (DomainType IN ('Knowledge', 'ProjectMemory', 'System'))
+            CONSTRAINT FK_Domains_ParentDomain
+                FOREIGN KEY (DomainParentId) REFERENCES dbo.Domains(DomainId),
+            CONSTRAINT FK_Domains_DomainTypes
+                FOREIGN KEY (DomainTypeId) REFERENCES dbo.DomainTypes(ID),
+            CONSTRAINT CK_Domains_ParentDomain_NotSelf
+                CHECK (DomainParentId IS NULL OR DomainParentId <> DomainId)
         );
-        CREATE INDEX IX_Domains_DomainType_Status
-            ON dbo.Domains(DomainType, Status);
+        CREATE INDEX IX_Domains_DomainParentId
+            ON dbo.Domains(DomainParentId);
+        CREATE INDEX IX_Domains_DomainTypeId
+            ON dbo.Domains(DomainTypeId);
+        CREATE INDEX IX_Domains_Parent_DisplayOrder
+            ON dbo.Domains(DomainParentId, DisplayOrder, DisplayName);
     END;
 
     IF OBJECT_ID('dbo.DomainClusters', 'U') IS NULL
     BEGIN
         CREATE TABLE dbo.DomainClusters (
             DomainClusterId    UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_DomainClusters_DomainClusterId DEFAULT (NEWID()),
+                CONSTRAINT DF_DomainClusters_DomainClusterId DEFAULT (NEWSEQUENTIALID()),
             ClusterCode        NVARCHAR(100) NOT NULL,
             DisplayName        NVARCHAR(255) NOT NULL,
             Description        NVARCHAR(MAX) NULL,
@@ -75,7 +112,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.Collections (
             CollectionId       UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_Collections_CollectionId DEFAULT (NEWID()),
+                CONSTRAINT DF_Collections_CollectionId DEFAULT (NEWSEQUENTIALID()),
             DomainId           UNIQUEIDENTIFIER NOT NULL,
             CollectionCode     NVARCHAR(100) NOT NULL,
             DisplayName        NVARCHAR(255) NOT NULL,
@@ -99,7 +136,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.Documents (
             DocumentId         UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_Documents_DocumentId DEFAULT (NEWID()),
+                CONSTRAINT DF_Documents_DocumentId DEFAULT (NEWSEQUENTIALID()),
             CollectionId       UNIQUEIDENTIFIER NOT NULL,
             SourceName         NVARCHAR(500) NOT NULL,
             SourcePath         NVARCHAR(1000) NULL,
@@ -126,7 +163,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.ContentUnits (
             ContentUnitId      UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_ContentUnits_ContentUnitId DEFAULT (NEWID()),
+                CONSTRAINT DF_ContentUnits_ContentUnitId DEFAULT (NEWSEQUENTIALID()),
             DocumentId         UNIQUEIDENTIFIER NOT NULL,
             UnitType           NVARCHAR(40) NOT NULL,
             UnitOrdinal        INT NOT NULL,
@@ -158,7 +195,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.EmbeddingProfiles (
             EmbeddingProfileId UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_EmbeddingProfiles_EmbeddingProfileId DEFAULT (NEWID()),
+                CONSTRAINT DF_EmbeddingProfiles_EmbeddingProfileId DEFAULT (NEWSEQUENTIALID()),
             ProfileCode        NVARCHAR(100) NOT NULL,
             Provider           NVARCHAR(50) NOT NULL,
             ModelName          NVARCHAR(200) NOT NULL,
@@ -184,7 +221,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.ContentUnitEmbeddings768 (
             ContentUnitEmbeddingId UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_ContentUnitEmbeddings768_Id DEFAULT (NEWID()),
+                CONSTRAINT DF_ContentUnitEmbeddings768_Id DEFAULT (NEWSEQUENTIALID()),
             ContentUnitId          UNIQUEIDENTIFIER NOT NULL,
             EmbeddingProfileId     UNIQUEIDENTIFIER NOT NULL,
             EmbeddingVector        VECTOR(768) NOT NULL,
@@ -207,7 +244,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.RetrievalProfiles (
             RetrievalProfileId UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_RetrievalProfiles_RetrievalProfileId DEFAULT (NEWID()),
+                CONSTRAINT DF_RetrievalProfiles_RetrievalProfileId DEFAULT (NEWSEQUENTIALID()),
             ProfileCode        NVARCHAR(100) NOT NULL,
             DisplayName        NVARCHAR(255) NOT NULL,
             RetrievalMode      NVARCHAR(40) NOT NULL,
@@ -237,7 +274,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.ProviderSettings (
             ProviderSettingId  UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_ProviderSettings_ProviderSettingId DEFAULT (NEWID()),
+                CONSTRAINT DF_ProviderSettings_ProviderSettingId DEFAULT (NEWSEQUENTIALID()),
             Provider           NVARCHAR(50) NOT NULL,
             SettingKey         NVARCHAR(200) NOT NULL,
             SettingValue       NVARCHAR(MAX) NOT NULL,
@@ -254,7 +291,7 @@ BEGIN
     BEGIN
         CREATE TABLE dbo.LegacyChromaMigrationState (
             LegacyChromaMigrationStateId UNIQUEIDENTIFIER NOT NULL
-                CONSTRAINT DF_LegacyChromaMigrationState_Id DEFAULT (NEWID()),
+                CONSTRAINT DF_LegacyChromaMigrationState_Id DEFAULT (NEWSEQUENTIALID()),
             LegacyStoreName      NVARCHAR(255) NULL,
             LegacyCollectionName NVARCHAR(255) NULL,
             TargetDomainId       UNIQUEIDENTIFIER NULL,
@@ -278,16 +315,10 @@ BEGIN
         );
     END;
 
-    IF NOT EXISTS (SELECT 1 FROM dbo.Domains WHERE DomainCode = 'projects')
+    IF NOT EXISTS (SELECT 1 FROM dbo.Domains WHERE DomainCode = 'workspace-memory')
     BEGIN
         INSERT INTO dbo.Domains (DomainCode, DomainType, DisplayName, Description)
-        VALUES ('projects', 'ProjectMemory', 'Projects', 'Short-term working memory scopes.');
-    END;
-
-    IF NOT EXISTS (SELECT 1 FROM dbo.Domains WHERE DomainCode = 'system')
-    BEGIN
-        INSERT INTO dbo.Domains (DomainCode, DomainType, DisplayName, Description)
-        VALUES ('system', 'System', 'System', 'System-owned metadata and defaults.');
+        VALUES ('workspace-memory', 'ProjectMemory', 'Workspace Memory', 'Workspace Memory for active chats, uploads, and project-level inference.');
     END;
 
     IF NOT EXISTS (SELECT 1 FROM dbo.EmbeddingProfiles WHERE ProfileCode = 'ollama-nomic-embed-text-v1-5-768')

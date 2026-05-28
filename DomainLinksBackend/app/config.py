@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     default_llm_provider: str = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_embed_model: str = "nomic-embed-text:v1.5"
-    ollama_chat_model: str = "gemma3:1b"
-    ollama_title_model: str = "gemma3:1b"
+    ollama_chat_model: str = "llama3.1:8b"
+    ollama_title_model: str = "llama3.1:8b"
     lmstudio_base_url: str = "http://127.0.0.1:1234"
 
     def public_config(self) -> dict[str, object]:

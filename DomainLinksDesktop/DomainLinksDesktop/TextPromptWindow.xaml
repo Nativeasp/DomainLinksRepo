@@ -2,8 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Text Prompt"
-        Height="210"
-        Width="480"
+        SizeToContent="Height"
+        Height="260"
+        Width="760"
+        MinWidth="640"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Background="#F3F1EC">
@@ -14,7 +16,8 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="12" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -22,6 +25,7 @@
                    FontSize="14"
                    FontWeight="SemiBold"
                    Foreground="#263746"
+                   TextWrapping="Wrap"
                    Text="Enter a value" />
 
         <TextBlock Grid.Row="2"
@@ -34,6 +38,7 @@
                  x:Name="ValueTextBox"
                  Height="34"
                  Padding="8,6"
+                 MinWidth="560"
                  VerticalContentAlignment="Center"
                  Background="#FFFFFF"
                  BorderBrush="#CDBFAF"
@@ -42,12 +47,11 @@
 
         <TextBlock Grid.Row="5"
                    x:Name="ValidationTextBlock"
-                   Margin="0,8,0,0"
                    Foreground="#B42318"
                    TextWrapping="Wrap"
                    Visibility="Collapsed" />
 
-        <StackPanel Grid.Row="6"
+        <StackPanel Grid.Row="7"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">
             <Button Width="92"

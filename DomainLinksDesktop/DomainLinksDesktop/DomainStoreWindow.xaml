@@ -92,15 +92,25 @@
                                    Text="Create and shape domain hierarchies for long-term RAG context." />
                         <StackPanel Orientation="Horizontal"
                                     Margin="0,10,0,0">
+                            <Button Width="96"
+                                    Height="30"
+                                    Margin="0,0,8,0"
+                                    Click="AddSharedRootButton_OnClick"
+                                    Content="Add Shared" />
+                            <Button Width="96"
+                                    Height="30"
+                                    Margin="0,0,8,0"
+                                    Click="AddClientRootButton_OnClick"
+                                    Content="Add Client" />
                             <Button Width="86"
                                     Height="30"
                                     Margin="0,0,8,0"
-                                    Click="AddRootButton_OnClick"
-                                    Content="Add Root" />
-                            <Button Width="86"
-                                    Height="30"
                                     Click="AddChildButton_OnClick"
                                     Content="Add Child" />
+                            <Button Width="76"
+                                    Height="30"
+                                    Click="DeleteDomainButton_OnClick"
+                                    Content="Delete" />
                         </StackPanel>
                     </StackPanel>
 
@@ -118,11 +128,12 @@
                             BorderThickness="1"
                             CornerRadius="6"
                             Padding="8">
-                        <TreeView x:Name="DomainTreeView"
-                                  SelectedItemChanged="DomainTreeView_OnSelectedItemChanged"
-                                  BorderThickness="0"
-                                  Background="Transparent">
-                            <TreeView.Resources>
+                        <Grid>
+                            <Grid.Resources>
+                                <Style TargetType="{x:Type TreeViewItem}">
+                                    <Setter Property="IsExpanded"
+                                            Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                </Style>
                                 <HierarchicalDataTemplate DataType="{x:Type local:DomainItem}"
                                                           ItemsSource="{Binding ChildDomains}">
                                     <Border Padding="6,5"
@@ -145,8 +156,53 @@
                                         </DockPanel>
                                     </Border>
                                 </HierarchicalDataTemplate>
-                            </TreeView.Resources>
-                        </TreeView>
+                            </Grid.Resources>
+
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="6" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="6" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#263746"
+                                       Text="Shared Services" />
+
+                            <TreeView Grid.Row="2"
+                                      x:Name="SharedDomainTreeView"
+                                      AllowDrop="True"
+                                      SelectedItemChanged="DomainTreeView_OnSelectedItemChanged"
+                                      PreviewMouseLeftButtonDown="DomainTreeView_OnPreviewMouseLeftButtonDown"
+                                      MouseMove="DomainTreeView_OnMouseMove"
+                                      DragOver="DomainTreeView_OnDragOver"
+                                      Drop="DomainTreeView_OnDrop"
+                                      PreviewKeyDown="DomainTreeView_OnPreviewKeyDown"
+                                      BorderThickness="0"
+                                      Background="Transparent" />
+
+                            <TextBlock Grid.Row="4"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#263746"
+                                       Text="Client Services" />
+
+                            <TreeView Grid.Row="6"
+                                      x:Name="ClientDomainTreeView"
+                                      AllowDrop="True"
+                                      SelectedItemChanged="DomainTreeView_OnSelectedItemChanged"
+                                      PreviewMouseLeftButtonDown="DomainTreeView_OnPreviewMouseLeftButtonDown"
+                                      MouseMove="DomainTreeView_OnMouseMove"
+                                      DragOver="DomainTreeView_OnDragOver"
+                                      Drop="DomainTreeView_OnDrop"
+                                      PreviewKeyDown="DomainTreeView_OnPreviewKeyDown"
+                                      BorderThickness="0"
+                                      Background="Transparent" />
+                        </Grid>
                     </Border>
                 </Grid>
             </Border>
@@ -450,6 +506,8 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock FontSize="17"
@@ -466,6 +524,11 @@
                                     Height="32"
                                     Click="NewCollectionButton_OnClick"
                                     Content="New Collection" />
+                            <Button Grid.Column="3"
+                                    Width="122"
+                                    Height="32"
+                                    Click="DeleteCollectionButton_OnClick"
+                                    Content="Delete Collection" />
                         </Grid>
 
                         <Border Grid.Row="2"

@@ -27,15 +27,9 @@
                 BorderBrush="#D6D0C4"
                 BorderThickness="1"
                 CornerRadius="6"
-                Padding="2">
-            <Menu Background="Transparent"
-                  BorderThickness="0"
-                  FontSize="14">
-                <MenuItem Header="_Tools">
-                    <MenuItem Header="OCR Viewer"
-                              Click="OpenOcrViewerMenuItem_OnClick" />
-                </MenuItem>
-            </Menu>
+                Height="70"
+                ClipToBounds="True">
+            <wv2:WebView2 x:Name="ShellMenuWebView" />
         </Border>
 
         <Border Grid.Row="2"
@@ -461,7 +455,7 @@
                                        Margin="0,4,0,0"
                                        Foreground="#5B6770"
                                        FontSize="12"
-                                    Text="Each project root on the left is the actual short-memory collection and upload target." />
+                                    Text="Each project root on the left is the actual Workspace Memory collection and upload target." />
                         </StackPanel>
                         <StackPanel Grid.Column="1"
                                     Margin="12,0,0,0"
@@ -908,11 +902,11 @@
                         <TextBlock FontSize="17"
                                    FontWeight="SemiBold"
                                    Foreground="#263746"
-                                   Text="Durable Domains" />
+                                   Text="Capability Domains" />
                         <TextBlock Margin="0,4,0,0"
                                    Foreground="#5B6770"
                                    FontSize="12"
-                                   Text="Select optional long-term memory to include with the prompt." />
+                                   Text="Select optional capability-domain context to include with the prompt." />
                     </StackPanel>
 
                     <TreeView Grid.Row="2"
@@ -920,8 +914,17 @@
                               Background="Transparent"
                               BorderThickness="0">
                         <TreeView.Resources>
-                            <HierarchicalDataTemplate DataType="{x:Type local:DomainItem}" ItemsSource="{Binding Collections}">
-                                <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" />
+                            <Style TargetType="TreeViewItem">
+                                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                            </Style>
+                            <HierarchicalDataTemplate DataType="{x:Type local:DomainItem}" ItemsSource="{Binding TreeChildren}">
+                                <CheckBox Content="{Binding DisplayName}"
+                                          FontWeight="SemiBold"
+                                          IsThreeState="True"
+                                          IsChecked="{Binding IsIncluded}"
+                                          Checked="ContextCheckBox_OnChanged"
+                                          Unchecked="ContextCheckBox_OnChanged"
+                                          Indeterminate="ContextCheckBox_OnChanged" />
                             </HierarchicalDataTemplate>
                             <DataTemplate DataType="{x:Type local:CollectionItem}">
                                 <CheckBox Content="{Binding DisplayName}"
