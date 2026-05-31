@@ -110,6 +110,7 @@ public partial class MainWindow : Window
         ResponseWebView.CoreWebView2.WebMessageReceived += ResponseWebView_OnWebMessageReceived;
         ShowEmptyResponseState("Response output will appear here.");
         await ResolveConfiguredServiceUrlsAsync();
+        OpenDomainStore();
         await LoadShellAsync();
     }
 
@@ -135,6 +136,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        var latestSettings = DomainLinksDesktopSettings.Load();
         var saved = new DomainLinksDesktopSettings
         {
             BackendBaseUrl = _settings.BackendBaseUrl,
@@ -148,13 +150,13 @@ public partial class MainWindow : Window
             LeftPaneWidth = LeftPaneColumn.ActualWidth,
             RightPaneWidth = RightPaneColumn.ActualWidth,
             PromptPaneHeight = PromptInputRow.ActualHeight,
-            DomainStoreWindowWidth = _settings.DomainStoreWindowWidth,
-            DomainStoreWindowHeight = _settings.DomainStoreWindowHeight,
-            DomainStoreWindowLeft = _settings.DomainStoreWindowLeft,
-            DomainStoreWindowTop = _settings.DomainStoreWindowTop,
-            DomainStoreLeftPaneWidth = _settings.DomainStoreLeftPaneWidth,
-            DomainStoreCenterPaneWidth = _settings.DomainStoreCenterPaneWidth,
-            DomainStoreCollectionsPaneHeight = _settings.DomainStoreCollectionsPaneHeight,
+            DomainStoreWindowWidth = latestSettings.DomainStoreWindowWidth,
+            DomainStoreWindowHeight = latestSettings.DomainStoreWindowHeight,
+            DomainStoreWindowLeft = latestSettings.DomainStoreWindowLeft,
+            DomainStoreWindowTop = latestSettings.DomainStoreWindowTop,
+            DomainStoreLeftPaneWidth = latestSettings.DomainStoreLeftPaneWidth,
+            DomainStoreCenterPaneWidth = latestSettings.DomainStoreCenterPaneWidth,
+            DomainStoreCollectionsPaneHeight = latestSettings.DomainStoreCollectionsPaneHeight,
             LastSelectedModel = ModelComboBox.SelectedValue as string ?? string.Empty,
         };
         saved.Save();
@@ -391,7 +393,15 @@ public partial class MainWindow : Window
             _domainStoreWindow = null;
         }
 
-        _domainStoreWindow = new DomainStoreWindow(_settings)
+        var latestSettings = DomainLinksDesktopSettings.Load() with
+        {
+            BackendBaseUrl = _settings.BackendBaseUrl,
+            OllamaBaseUrl = _settings.OllamaBaseUrl,
+            BackendFallbackUrls = _settings.BackendFallbackUrls,
+            OllamaFallbackUrls = _settings.OllamaFallbackUrls,
+        };
+
+        _domainStoreWindow = new DomainStoreWindow(latestSettings)
         {
             Owner = this,
         };

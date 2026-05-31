@@ -430,6 +430,35 @@ public sealed class DomainAssistResponse
     public AskResponseMetrics? Metrics { get; set; }
 }
 
+public sealed class SuggestedChildDomain
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string DomainType { get; set; } = string.Empty;
+    public string DomainCode { get; set; } = string.Empty;
+}
+
+public sealed class DomainChildSuggestionResponse
+{
+    public SuggestedChildDomain? Suggestion { get; set; }
+    public string SqlPreview { get; set; } = string.Empty;
+    public string SystemPromptLabel { get; set; } = string.Empty;
+    public AskResponseMetrics? Metrics { get; set; }
+}
+
+public sealed class DomainChildExecutionResponse
+{
+    public DomainItem? CreatedDomain { get; set; }
+    public string SqlPreview { get; set; } = string.Empty;
+}
+
+public sealed class PromptPreviewResponse
+{
+    public string Model { get; set; } = string.Empty;
+    public string SystemPrompt { get; set; } = string.Empty;
+    public string UserPrompt { get; set; } = string.Empty;
+}
+
 public sealed class DomainDeletePreviewResponse
 {
     public string DomainCode { get; set; } = string.Empty;

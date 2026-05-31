@@ -89,6 +89,27 @@ class DomainAssistRequest(BaseModel):
     model: str | None = None
 
 
+class DomainChildSuggestionRequest(BaseModel):
+    parentDomainCode: str
+    instruction: str
+    draftText: str | None = None
+    model: str | None = None
+
+
+class ExecuteDomainChildSuggestionRequest(BaseModel):
+    parentDomainCode: str
+    displayName: str
+    description: str | None = None
+    domainType: str
+    domainCode: str | None = None
+
+
+class PromptPreviewResponse(BaseModel):
+    model: str
+    systemPrompt: str
+    userPrompt: str
+
+
 class AskRequest(BaseModel):
     prompt: str
     shortMemoryCollectionCode: str
@@ -226,11 +247,11 @@ def _extract_metrics(payload: dict[str, object], model: str | None = None) -> di
     }
 
 
-def _build_domain_assist_prompt(
+def _build_domain_assist_prompt_parts(
     domain_context: dict[str, object],
     instruction: str,
     draft_text: str | None,
-) -> str:
+) -> tuple[str, str]:
     domain = domain_context.get("domain") or {}
     child_domains = domain_context.get("childDomains") or []
     collections = domain_context.get("collections") or []
@@ -249,13 +270,15 @@ def _build_domain_assist_prompt(
         for item in documents
     ]
 
-    return (
+    system_prompt = (
         "You are helping curate a local RAG domain store for an internal knowledge workspace. "
         "Write concise, clear domain wording that improves retrieval usefulness. "
         "Preserve organizational meaning. Avoid generic filler and avoid marketing tone. "
         "Help distinguish the selected domain from sibling domains and describe what belongs in it. "
         "Return only the suggested wording or answer requested by the user. "
-        "Do not use bullet points unless the user explicitly asks for them.\n\n"
+        "Do not use bullet points unless the user explicitly asks for them."
+    )
+    user_prompt = (
         f"Selected domain name: {domain.get('DisplayName') or ''}\n"
         f"Selected domain code: {domain.get('DomainCode') or ''}\n"
         f"Selected domain type: {domain.get('DomainType') or ''}\n"
@@ -265,6 +288,169 @@ def _build_domain_assist_prompt(
         f"Collections in this domain:\n{chr(10).join(collection_lines) if collection_lines else 'None'}\n\n"
         f"Recent documents in this domain:\n{chr(10).join(document_lines) if document_lines else 'None'}\n\n"
         f"User instruction:\n{instruction.strip()}\n"
+    )
+    return system_prompt, user_prompt
+
+
+def _build_domain_assist_prompt(
+    domain_context: dict[str, object],
+    instruction: str,
+    draft_text: str | None,
+) -> str:
+    system_prompt, user_prompt = _build_domain_assist_prompt_parts(domain_context, instruction, draft_text)
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def _build_child_domain_suggestion_prompt_parts(
+    domain_context: dict[str, object],
+    instruction: str,
+    draft_text: str | None,
+    domain_types: list[dict[str, object]],
+) -> tuple[str, str]:
+    domain = domain_context.get("domain") or {}
+    child_domains = domain_context.get("childDomains") or []
+    child_lines = [
+        f"- {item.get('displayName')} ({item.get('domainType') or 'Unknown type'})"
+        for item in child_domains
+    ]
+    allowed_type_lines = [
+        f"- {item.get('CODE')}: {item.get('NAME')}"
+        for item in domain_types
+        if item.get("CODE")
+    ]
+
+    system_prompt = (
+        "You are helping organize a business domain map.\n\n"
+        'A domain is a specific area of knowledge, activity, control, or interest, often representing a field where someone has expertise or authority, such as "the financial domain".\n\n'
+        "Your task is to suggest exactly one new child domain under the selected parent domain.\n\n"
+        "Return only valid JSON in this exact structure:\n"
+        "{\n"
+        '  "displayName": "Domain Title here",\n'
+        '  "description": "Context text here...",\n'
+        '  "domainType": "EXECUTIVE"\n'
+        "}\n\n"
+        "Rules:\n"
+        "- Return only JSON.\n"
+        "- Do not wrap the JSON in markdown fences.\n"
+        "- Do not include any explanation before or after the JSON.\n"
+        '- "displayName" must be a concise business domain title.\n'
+        '- "description" must explain what belongs in the domain and what underlying information, activities, responsibilities, or controls it covers.\n'
+        '- "domainType" must be exactly one of: EXECUTIVE, CORPORATE, SERVICE.\n'
+        "- Do not repeat or closely duplicate an existing child domain.\n"
+        "- Make the suggestion fit naturally under the selected parent domain.\n"
+        "- Prefer clarity and specificity over broad or generic wording."
+    )
+    user_prompt = (
+        f"Selected parent domain name: {domain.get('DisplayName') or ''}\n"
+        f"Selected parent domain code: {domain.get('DomainCode') or ''}\n"
+        f"Selected parent domain type: {domain.get('DomainType') or ''}\n"
+        f"Parent path: {domain_context.get('parentPath') or '(root)'}\n"
+        f"Selected parent domain description:\n{draft_text if draft_text is not None else (domain.get('Description') or '')}\n\n"
+        f"Existing child domains:\n{chr(10).join(child_lines) if child_lines else 'None'}\n\n"
+        f"Allowed domain types:\n{chr(10).join(allowed_type_lines) if allowed_type_lines else 'None'}\n\n"
+        f"User instruction:\n{instruction.strip()}\n"
+    )
+    return system_prompt, user_prompt
+
+
+def _build_child_domain_suggestion_prompt(
+    domain_context: dict[str, object],
+    instruction: str,
+    draft_text: str | None,
+    domain_types: list[dict[str, object]],
+) -> str:
+    system_prompt, user_prompt = _build_child_domain_suggestion_prompt_parts(
+        domain_context,
+        instruction,
+        draft_text,
+        domain_types,
+    )
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def _extract_json_object(raw_text: str) -> dict[str, object]:
+    text = (raw_text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("The model did not return a JSON object.")
+
+    return json.loads(text[start : end + 1])
+
+
+def _normalize_domain_type_code(domain_type: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "_", (domain_type or "").strip().upper()).strip("_")
+
+
+def _slugify_code(value: str) -> str:
+    code = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    if not code:
+        raise ValueError("Code must contain at least one letter or digit.")
+    return code[:100]
+
+
+def _sql_nvarchar_literal(value: str | None) -> str:
+    if value is None:
+        return "NULL"
+    escaped = value.replace("'", "''")
+    return f"N'{escaped}'"
+
+
+def _resolve_domain_type(domain_types: list[dict[str, object]], requested_type: str) -> dict[str, object]:
+    normalized_requested = _normalize_domain_type_code(requested_type)
+    for domain_type in domain_types:
+        code = _normalize_domain_type_code(str(domain_type.get("CODE") or ""))
+        name = _normalize_domain_type_code(str(domain_type.get("NAME") or ""))
+        if normalized_requested and normalized_requested in {code, name}:
+            return domain_type
+    raise ValueError(f"Domain type '{requested_type}' is not valid for child domain creation.")
+
+
+def _build_child_domain_insert_preview(
+    parent_domain_code: str,
+    domain_type_code: str,
+    domain_code: str,
+    display_name: str,
+    description: str | None,
+) -> str:
+    parent_literal = _sql_nvarchar_literal(parent_domain_code)
+    type_literal = _sql_nvarchar_literal(domain_type_code)
+    code_literal = _sql_nvarchar_literal(domain_code)
+    name_literal = _sql_nvarchar_literal(display_name.strip())
+    description_literal = _sql_nvarchar_literal(description.strip() if description else None)
+
+    return (
+        f"DECLARE @ParentDomainCode NVARCHAR(100) = {parent_literal};\n"
+        f"DECLARE @DomainTypeCode NVARCHAR(50) = {type_literal};\n\n"
+        "INSERT INTO dbo.Domains (\n"
+        "    DomainParentId,\n"
+        "    DomainTypeId,\n"
+        "    DomainOrientationId,\n"
+        "    DisplayOrder,\n"
+        "    DomainCode,\n"
+        "    DisplayName,\n"
+        "    Description\n"
+        ")\n"
+        "SELECT\n"
+        "    parent.DomainId,\n"
+        "    dt.ID,\n"
+        "    parent.DomainOrientationId,\n"
+        "    COALESCE((\n"
+        "        SELECT MAX(sibling.DisplayOrder) + 10\n"
+        "        FROM dbo.Domains sibling\n"
+        "        WHERE sibling.Status = 'Active' AND sibling.DomainParentId = parent.DomainId\n"
+        "    ), 10),\n"
+        f"    {code_literal},\n"
+        f"    {name_literal},\n"
+        f"    {description_literal}\n"
+        "FROM dbo.Domains parent\n"
+        "JOIN dbo.DomainTypes dt\n"
+        "    ON dt.CODE = @DomainTypeCode\n"
+        "WHERE parent.DomainCode = @ParentDomainCode AND parent.Status = 'Active';"
     )
 
 
@@ -322,6 +508,151 @@ def create_app() -> FastAPI:
             domain_parent_id=request.domainParentId,
         )
 
+    @app.post("/domains/assist")
+    def assist_domain(request: DomainAssistRequest) -> dict[str, object]:
+        instruction = request.instruction.strip()
+        if not instruction:
+            raise HTTPException(status_code=400, detail="Instruction is required.")
+
+        domain_context = get_domain_assist_context(settings, request.domainCode)
+        compiled_prompt = _build_domain_assist_prompt(domain_context, instruction, request.draftText)
+        answer_payload = _generate_with_ollama(settings, compiled_prompt, model=request.model)
+        answer = str(answer_payload.get("response", "")).strip()
+
+        return {
+            "answer": answer,
+            "systemPromptLabel": "Domain curation assist",
+            "metrics": _extract_metrics(answer_payload, model=request.model),
+        }
+
+    @app.post("/domains/assist-preview")
+    def assist_domain_preview(request: DomainAssistRequest) -> PromptPreviewResponse:
+        instruction = request.instruction.strip()
+        if not instruction:
+            raise HTTPException(status_code=400, detail="Instruction is required.")
+
+        domain_context = get_domain_assist_context(settings, request.domainCode)
+        system_prompt, user_prompt = _build_domain_assist_prompt_parts(
+            domain_context,
+            instruction,
+            request.draftText,
+        )
+        return PromptPreviewResponse(
+            model=request.model or settings.ollama_chat_model,
+            systemPrompt=system_prompt,
+            userPrompt=user_prompt,
+        )
+
+    @app.post("/domains/suggest-child")
+    def suggest_child_domain(request: DomainChildSuggestionRequest) -> dict[str, object]:
+        instruction = request.instruction.strip()
+        if not instruction:
+            raise HTTPException(status_code=400, detail="Instruction is required.")
+
+        domain_context = get_domain_assist_context(settings, request.parentDomainCode)
+        domain_types = list_domain_types(settings)
+        compiled_prompt = _build_child_domain_suggestion_prompt(
+            domain_context,
+            instruction,
+            request.draftText,
+            domain_types,
+        )
+        answer_payload = _generate_with_ollama(settings, compiled_prompt, model=request.model)
+        raw_answer = str(answer_payload.get("response", "")).strip()
+
+        try:
+            parsed = _extract_json_object(raw_answer)
+            display_name = str(parsed.get("displayName") or "").strip()
+            description = str(parsed.get("description") or "").strip()
+            requested_type = str(parsed.get("domainType") or "").strip()
+            if not display_name:
+                raise ValueError("The model did not return a displayName.")
+            if not requested_type:
+                raise ValueError("The model did not return a domainType.")
+
+            resolved_domain_type = _resolve_domain_type(domain_types, requested_type)
+            domain_type_code = str(resolved_domain_type.get("CODE") or "").strip().upper()
+            domain_code = _slugify_code(str(parsed.get("domainCode") or display_name))
+            sql_preview = _build_child_domain_insert_preview(
+                str(request.parentDomainCode).strip(),
+                domain_type_code,
+                domain_code,
+                display_name,
+                description or None,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Child suggestion parsing failed: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Child suggestion JSON was invalid: {exc}") from exc
+
+        return {
+            "suggestion": {
+                "displayName": display_name,
+                "description": description,
+                "domainType": domain_type_code,
+                "domainCode": domain_code,
+            },
+            "sqlPreview": sql_preview,
+            "systemPromptLabel": "Child domain suggestion assist",
+            "metrics": _extract_metrics(answer_payload, model=request.model),
+        }
+
+    @app.post("/domains/suggest-child-preview")
+    def suggest_child_domain_preview(request: DomainChildSuggestionRequest) -> PromptPreviewResponse:
+        instruction = request.instruction.strip()
+        if not instruction:
+            raise HTTPException(status_code=400, detail="Instruction is required.")
+
+        domain_context = get_domain_assist_context(settings, request.parentDomainCode)
+        domain_types = list_domain_types(settings)
+        system_prompt, user_prompt = _build_child_domain_suggestion_prompt_parts(
+            domain_context,
+            instruction,
+            request.draftText,
+            domain_types,
+        )
+        return PromptPreviewResponse(
+            model=request.model or settings.ollama_chat_model,
+            systemPrompt=system_prompt,
+            userPrompt=user_prompt,
+        )
+
+    @app.post("/domains/suggest-child/execute")
+    def execute_suggested_child_domain(request: ExecuteDomainChildSuggestionRequest) -> dict[str, object]:
+        domain_context = get_domain_assist_context(settings, request.parentDomainCode)
+        parent_domain = domain_context.get("domain") or {}
+        if not parent_domain:
+            raise HTTPException(status_code=404, detail="Parent domain not found.")
+
+        domain_types = list_domain_types(settings)
+        try:
+            resolved_domain_type = _resolve_domain_type(domain_types, request.domainType)
+            domain_type_code = str(resolved_domain_type.get("CODE") or "").strip().upper()
+            domain_code = _slugify_code(request.domainCode or request.displayName)
+            sql_preview = _build_child_domain_insert_preview(
+                request.parentDomainCode.strip(),
+                domain_type_code,
+                domain_code,
+                request.displayName,
+                request.description,
+            )
+            created_domain = create_domain(
+                settings,
+                domain_code=domain_code,
+                domain_type_id=int(resolved_domain_type.get("ID")),
+                domain_orientation_id=parent_domain.get("DomainOrientationId"),
+                display_name=request.displayName,
+                description=request.description,
+                domain_parent_id=parent_domain.get("DomainId"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        return {
+            "createdDomain": created_domain,
+            "sqlPreview": sql_preview,
+        }
+
     @app.put("/domains/{domainCode}")
     def edit_domain(domainCode: str, request: UpdateDomainRequest) -> dict[str, object]:
         return update_domain(
@@ -349,23 +680,6 @@ def create_app() -> FastAPI:
     @app.delete("/domains/{domainCode}")
     def remove_domain(domainCode: str) -> dict[str, object]:
         return delete_domain(settings, domainCode)
-
-    @app.post("/domains/assist")
-    def assist_domain(request: DomainAssistRequest) -> dict[str, object]:
-        instruction = request.instruction.strip()
-        if not instruction:
-            raise HTTPException(status_code=400, detail="Instruction is required.")
-
-        domain_context = get_domain_assist_context(settings, request.domainCode)
-        compiled_prompt = _build_domain_assist_prompt(domain_context, instruction, request.draftText)
-        answer_payload = _generate_with_ollama(settings, compiled_prompt, model=request.model)
-        answer = str(answer_payload.get("response", "")).strip()
-
-        return {
-            "answer": answer,
-            "systemPromptLabel": "Domain curation assist",
-            "metrics": _extract_metrics(answer_payload, model=request.model),
-        }
 
     @app.get("/collections")
     def collections(domainCode: str | None = None) -> list[dict[str, object]]:

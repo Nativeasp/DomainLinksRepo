@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -15,6 +16,7 @@ namespace DomainLinksDesktop;
 
 public partial class DomainStoreWindow : Window
 {
+    private const string DomainAssistModelName = "qwen3.5:35b-mlx";
     private readonly DomainLinksDesktopSettings _settings;
     private readonly HttpClient _httpClient;
     private readonly ObservableCollection<DomainItem> _sharedRootDomains = [];
@@ -23,7 +25,9 @@ public partial class DomainStoreWindow : Window
     private readonly ObservableCollection<DomainTypeItem> _domainTypes = [];
     private readonly ObservableCollection<DomainOrientationItem> _domainOrientations = [];
     private DomainItem? _selectedDomain;
+    private string? _isolatedDomainCode;
     private string _lastAssistResponse = string.Empty;
+    private SuggestedChildDomain? _lastSuggestedChildDomain;
     private DomainItem? _pendingDragDomain;
     private Point _dragStartPoint;
     private bool _isReorderingRoots;
@@ -58,7 +62,6 @@ public partial class DomainStoreWindow : Window
     {
         DomainTreeColumn.Width = new GridLength(_settings.DomainStoreLeftPaneWidth);
         SummaryColumn.Width = new GridLength(_settings.DomainStoreCenterPaneWidth);
-        CollectionsSectionRow.Height = new GridLength(_settings.DomainStoreCollectionsPaneHeight);
         await ReloadAsync();
     }
 
@@ -83,7 +86,7 @@ public partial class DomainStoreWindow : Window
             DomainStoreWindowTop = Top,
             DomainStoreLeftPaneWidth = DomainTreeColumn.ActualWidth,
             DomainStoreCenterPaneWidth = SummaryColumn.ActualWidth,
-            DomainStoreCollectionsPaneHeight = CollectionsSectionRow.ActualHeight,
+            DomainStoreCollectionsPaneHeight = _settings.DomainStoreCollectionsPaneHeight,
             LastSelectedModel = _settings.LastSelectedModel,
         };
         saved.Save();
@@ -265,6 +268,8 @@ public partial class DomainStoreWindow : Window
             $"{domain.ChildDomains.Count} child domains, {domain.Collections.Count} collections";
         AssistResponseTextBox.Text = string.Empty;
         _lastAssistResponse = string.Empty;
+        ClearSuggestedChildPreview();
+        UpdateAssistActionAvailability();
 
         CollectionsListBox.ItemsSource = domain.Collections
             .OrderBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
@@ -342,9 +347,18 @@ public partial class DomainStoreWindow : Window
         DomainStatsTextBlock.Text = "Select a domain";
         AssistResponseTextBox.Text = string.Empty;
         _lastAssistResponse = string.Empty;
+        ClearSuggestedChildPreview();
+        UpdateAssistActionAvailability();
         CollectionsListBox.ItemsSource = null;
         DocumentsDataGrid.ItemsSource = null;
         DocumentScopeTextBlock.Text = "No collection selected";
+    }
+
+    private void UpdateAssistActionAvailability()
+    {
+        var hasSelectedDomain = _selectedDomain is not null;
+        GenerateAssistButton.IsEnabled = hasSelectedDomain;
+        SuggestChildNodeButton.IsEnabled = hasSelectedDomain;
     }
 
     private void DomainSearchTextBox_OnTextChanged(object sender, TextChangedEventArgs e)
@@ -363,6 +377,8 @@ public partial class DomainStoreWindow : Window
         _clientRootDomains.Clear();
         var searchText = DomainSearchTextBox?.Text?.Trim() ?? string.Empty;
         var hasSearch = !string.IsNullOrWhiteSpace(searchText);
+        var isolatedDomain = GetIsolatedDomain();
+        var visibleRoots = isolatedDomain is null ? _allRootDomains : [isolatedDomain];
 
         foreach (var rootDomain in _allRootDomains)
         {
@@ -371,6 +387,13 @@ public partial class DomainStoreWindow : Window
 
         if (!hasSearch)
         {
+            if (isolatedDomain is not null)
+            {
+                SetExpandedRecursive(isolatedDomain, true);
+                _sharedRootDomains.Add(isolatedDomain);
+                return;
+            }
+
             foreach (var group in _allRootDomains
                          .GroupBy(domain => string.IsNullOrWhiteSpace(domain.DomainType) ? "Unclassified" : domain.DomainType)
                          .OrderBy(group => GetDomainTypeSortBucket(group.Key))
@@ -391,13 +414,20 @@ public partial class DomainStoreWindow : Window
             return;
         }
 
-        foreach (var match in _allRootDomains
+        foreach (var match in visibleRoots
                      .SelectMany(EnumerateDomains)
                      .Where(domain => DomainFieldMatches(domain, searchText))
                      .OrderBy(domain => domain.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             _sharedRootDomains.Add(CreateSearchResultItem(match));
         }
+    }
+
+    private DomainItem? GetIsolatedDomain()
+    {
+        return string.IsNullOrWhiteSpace(_isolatedDomainCode)
+            ? null
+            : FindDomainByCode(_isolatedDomainCode);
     }
 
     private static DomainItem CreateDomainTypeGroup(string domainType)
@@ -1086,7 +1116,8 @@ public partial class DomainStoreWindow : Window
 
     private async void GenerateAssistButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_selectedDomain is null)
+        var targetDomain = ResolveSelectedDomainForAction(showPrompt: false);
+        if (targetDomain is null)
         {
             MessageBox.Show(this, "Select a domain first.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -1102,16 +1133,30 @@ public partial class DomainStoreWindow : Window
         try
         {
             GenerateAssistButton.IsEnabled = false;
-            StatusTextBlock.Text = $"Generating wording help for {_selectedDomain.DisplayName}...";
+            SuggestChildNodeButton.IsEnabled = false;
+            StatusTextBlock.Text = $"Generating wording help for {targetDomain.DisplayName}...";
             AssistResponseTextBox.Text = "Generating suggestion...";
+            ClearSuggestedChildPreview();
+
+            await ShowPromptPreviewAsync(
+                "/domains/assist-preview",
+                new
+                {
+                    domainCode = targetDomain.DomainCode,
+                    instruction,
+                    draftText = DomainDescriptionTextBox.Text,
+                    model = DomainAssistModelName,
+                },
+                "Domain Assist Prompt Preview");
 
             var response = await _httpClient.PostAsJsonAsync(
                 "/domains/assist",
                 new
                 {
-                    domainCode = _selectedDomain.DomainCode,
+                    domainCode = targetDomain.DomainCode,
                     instruction,
                     draftText = DomainDescriptionTextBox.Text,
+                    model = DomainAssistModelName,
                 });
             response.EnsureSuccessStatusCode();
 
@@ -1131,7 +1176,89 @@ public partial class DomainStoreWindow : Window
         }
         finally
         {
-            GenerateAssistButton.IsEnabled = true;
+            UpdateAssistActionAvailability();
+        }
+    }
+
+    private async void SuggestChildNodeButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var targetDomain = ResolveSelectedDomainForAction(showPrompt: false);
+        if (targetDomain is null)
+        {
+            MessageBox.Show(this, "Select a domain first.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var instruction = AssistInstructionTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(instruction))
+        {
+            MessageBox.Show(this, "Enter an instruction for the writing assist.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            SuggestChildNodeButton.IsEnabled = false;
+            GenerateAssistButton.IsEnabled = false;
+            RunChildInsertButton.IsEnabled = false;
+            CopyChildSqlButton.IsEnabled = false;
+            _lastSuggestedChildDomain = null;
+            ChildSqlPreviewTextBox.Text = string.Empty;
+            StatusTextBlock.Text = $"Suggesting a child domain for {targetDomain.DisplayName}...";
+            AssistResponseTextBox.Text = "Generating child suggestion...";
+
+            await ShowPromptPreviewAsync(
+                "/domains/suggest-child-preview",
+                new
+                {
+                    parentDomainCode = targetDomain.DomainCode,
+                    instruction,
+                    draftText = DomainDescriptionTextBox.Text,
+                    model = DomainAssistModelName,
+                },
+                "Suggest Child Prompt Preview");
+
+            var response = await _httpClient.PostAsJsonAsync(
+                "/domains/suggest-child",
+                new
+                {
+                    parentDomainCode = targetDomain.DomainCode,
+                    instruction,
+                    draftText = DomainDescriptionTextBox.Text,
+                    model = DomainAssistModelName,
+                });
+            response.EnsureSuccessStatusCode();
+
+            var payload = await response.Content.ReadFromJsonAsync<DomainChildSuggestionResponse>();
+            if (payload?.Suggestion is null)
+            {
+                throw new InvalidOperationException("Child suggestion returned no suggestion payload.");
+            }
+
+            _lastSuggestedChildDomain = payload.Suggestion;
+            _lastAssistResponse = string.Empty;
+            AssistResponseTextBox.Text =
+                $"Display Name: {payload.Suggestion.DisplayName}{Environment.NewLine}" +
+                $"Domain Type: {payload.Suggestion.DomainType}{Environment.NewLine}" +
+                $"Domain Code: {payload.Suggestion.DomainCode}{Environment.NewLine}{Environment.NewLine}" +
+                $"{payload.Suggestion.Description}";
+            ChildSqlPreviewTextBox.Text = payload.SqlPreview ?? string.Empty;
+            CopyChildSqlButton.IsEnabled = !string.IsNullOrWhiteSpace(ChildSqlPreviewTextBox.Text);
+            RunChildInsertButton.IsEnabled = true;
+            StatusTextBlock.Text = string.IsNullOrWhiteSpace(payload.SystemPromptLabel)
+                ? "Child node suggestion ready."
+                : $"Child node suggestion ready via {payload.SystemPromptLabel}.";
+        }
+        catch (Exception ex)
+        {
+            AssistResponseTextBox.Text = string.Empty;
+            ClearSuggestedChildPreview();
+            StatusTextBlock.Text = $"Child suggestion failed: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Domain Store", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            UpdateAssistActionAvailability();
         }
     }
 
@@ -1141,6 +1268,31 @@ public partial class DomainStoreWindow : Window
         {
             AssistInstructionTextBox.Text = instruction;
         }
+    }
+
+    private async Task ShowPromptPreviewAsync(string endpoint, object payload, string title)
+    {
+        var response = await _httpClient.PostAsJsonAsync(endpoint, payload);
+        response.EnsureSuccessStatusCode();
+
+        var preview = await response.Content.ReadFromJsonAsync<PromptPreviewResponse>();
+        if (preview is null)
+        {
+            throw new InvalidOperationException("Prompt preview returned no response.");
+        }
+
+        var bodyText =
+            $"System prompt:{Environment.NewLine}{preview.SystemPrompt}{Environment.NewLine}{Environment.NewLine}" +
+            $"User prompt:{Environment.NewLine}{preview.UserPrompt}";
+        var previewWindow = new DocumentTextWindow(
+            title,
+            $"Model: {preview.Model}",
+            bodyText,
+            isReadOnly: true)
+        {
+            Owner = this,
+        };
+        previewWindow.ShowDialog();
     }
 
     private void ReplaceAssistButton_OnClick(object sender, RoutedEventArgs e)
@@ -1180,8 +1332,147 @@ public partial class DomainStoreWindow : Window
             return;
         }
 
-        Clipboard.SetText(_lastAssistResponse);
-        StatusTextBlock.Text = "Suggestion copied to the clipboard.";
+        if (TryCopyTextToClipboard(_lastAssistResponse))
+        {
+            StatusTextBlock.Text = "Suggestion copied to the clipboard.";
+        }
+    }
+
+    private void CopyChildSqlButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(ChildSqlPreviewTextBox.Text))
+        {
+            return;
+        }
+
+        if (TryCopyTextToClipboard(ChildSqlPreviewTextBox.Text))
+        {
+            StatusTextBlock.Text = "Suggested child SQL copied to the clipboard.";
+        }
+    }
+
+    private async void RunChildInsertButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var targetDomain = ResolveSelectedDomainForAction(showPrompt: false);
+        if (targetDomain is null)
+        {
+            MessageBox.Show(this, "Select a domain first.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (_lastSuggestedChildDomain is null)
+        {
+            MessageBox.Show(this, "Generate a child node suggestion first.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var suggestedChild = _lastSuggestedChildDomain;
+
+        try
+        {
+            RunChildInsertButton.IsEnabled = false;
+            StatusTextBlock.Text = $"Creating child domain {suggestedChild.DisplayName}...";
+
+            var response = await _httpClient.PostAsJsonAsync(
+                "/domains/suggest-child/execute",
+                new
+                {
+                    parentDomainCode = targetDomain.DomainCode,
+                    displayName = suggestedChild.DisplayName,
+                    description = suggestedChild.Description,
+                    domainType = suggestedChild.DomainType,
+                    domainCode = suggestedChild.DomainCode,
+                });
+            response.EnsureSuccessStatusCode();
+
+            var payload = await response.Content.ReadFromJsonAsync<DomainChildExecutionResponse>();
+            var createdDomainCode = payload?.CreatedDomain?.DomainCode ?? suggestedChild.DomainCode;
+            await ReloadAsync(createdDomainCode);
+            StatusTextBlock.Text = $"Created child domain {suggestedChild.DisplayName}.";
+            ClearSuggestedChildPreview();
+        }
+        catch (Exception ex)
+        {
+            RunChildInsertButton.IsEnabled = true;
+            StatusTextBlock.Text = $"Child insert failed: {ex.Message}";
+            MessageBox.Show(this, ex.Message, "Domain Store", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ClearSuggestedChildPreview()
+    {
+        _lastSuggestedChildDomain = null;
+        ChildSqlPreviewTextBox.Text = string.Empty;
+        CopyChildSqlButton.IsEnabled = false;
+        RunChildInsertButton.IsEnabled = false;
+    }
+
+    private void DomainLabelTextBlock_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not TextBlock { DataContext: DomainItem domain })
+        {
+            return;
+        }
+
+        var labelText = (domain.SourceDomain ?? domain).DisplayName?.Trim();
+        if (string.IsNullOrWhiteSpace(labelText))
+        {
+            return;
+        }
+
+        if (TryCopyTextToClipboard(labelText))
+        {
+            StatusTextBlock.Text = $"Copied label: {labelText}";
+        }
+
+        e.Handled = true;
+    }
+
+    private void StaticLabelTextBlock_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not TextBlock textBlock)
+        {
+            return;
+        }
+
+        var labelText = textBlock.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(labelText))
+        {
+            return;
+        }
+
+        if (TryCopyTextToClipboard(labelText))
+        {
+            StatusTextBlock.Text = $"Copied label: {labelText}";
+        }
+
+        e.Handled = true;
+    }
+
+    private bool TryCopyTextToClipboard(string text)
+    {
+        const int maxAttempts = 5;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                Clipboard.SetText(text);
+                return true;
+            }
+            catch (System.Runtime.InteropServices.COMException) when (attempt < maxAttempts)
+            {
+                Thread.Sleep(40 * attempt);
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = $"Clipboard copy failed: {ex.Message}";
+                return false;
+            }
+        }
+
+        StatusTextBlock.Text = "Clipboard is busy. Try again in a moment.";
+        return false;
     }
 
     private static string Slugify(string value)
@@ -1211,6 +1502,147 @@ public partial class DomainStoreWindow : Window
             {
                 SelectDomain(domain.SourceDomain ?? domain);
             }
+        }
+    }
+
+    private void DomainTreeViewItem_OnPreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is TreeViewItem item)
+        {
+            item.IsSelected = true;
+            item.Focus();
+        }
+    }
+
+    private void DomainTreeItemContextMenu_OnOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu contextMenu || contextMenu.Items.Count < 3)
+        {
+            return;
+        }
+
+        var isolateMenuItem = contextMenu.Items[0] as MenuItem;
+        var saveBranchMenuItem = contextMenu.Items[1] as MenuItem;
+        var showFullTreeMenuItem = contextMenu.Items[2] as MenuItem;
+        var domain = ResolveContextMenuDomain(contextMenu);
+
+        if (isolateMenuItem is not null)
+        {
+            isolateMenuItem.IsEnabled = domain is not null;
+            isolateMenuItem.Header = domain is null ? "Isolate Branch" : $"Isolate Branch: {domain.DisplayName}";
+        }
+
+        if (saveBranchMenuItem is not null)
+        {
+            saveBranchMenuItem.IsEnabled = domain is not null;
+        }
+
+        if (showFullTreeMenuItem is not null)
+        {
+            showFullTreeMenuItem.Visibility = string.IsNullOrWhiteSpace(_isolatedDomainCode)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+    }
+
+    private void IsolateBranchMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        var domain = ResolveContextMenuDomain(sender);
+        if (domain is null)
+        {
+            return;
+        }
+
+        _isolatedDomainCode = domain.DomainCode;
+        if (!string.IsNullOrWhiteSpace(DomainSearchTextBox.Text))
+        {
+            DomainSearchTextBox.Text = string.Empty;
+        }
+
+        ApplyDomainSearchFilter();
+        SelectDomain(domain);
+        StatusTextBlock.Text = $"Showing branch: {domain.DisplayName}.";
+    }
+
+    private void ShowFullTreeMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        _isolatedDomainCode = null;
+        if (!string.IsNullOrWhiteSpace(DomainSearchTextBox.Text))
+        {
+            DomainSearchTextBox.Text = string.Empty;
+        }
+
+        ApplyDomainSearchFilter();
+        if (_selectedDomain is not null)
+        {
+            SelectDomain(_selectedDomain.SourceDomain ?? _selectedDomain);
+        }
+
+        StatusTextBlock.Text = "Showing full domain tree.";
+    }
+
+    private void SaveBranchToClipboardMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        var domain = ResolveContextMenuDomain(sender);
+        if (domain is null)
+        {
+            return;
+        }
+
+        var branchText = BuildBranchClipboardText(domain.SourceDomain ?? domain);
+        if (TryCopyTextToClipboard(branchText))
+        {
+            StatusTextBlock.Text = $"Copied branch: {domain.DisplayName}";
+        }
+    }
+
+    private DomainItem? ResolveContextMenuDomain(object sender)
+    {
+        if (sender is ContextMenu contextMenu)
+        {
+            if (contextMenu.PlacementTarget is TreeView treeView)
+            {
+                return ResolveSelectableDomain(treeView.SelectedItem as DomainItem);
+            }
+
+            return ResolveSelectableDomain((contextMenu.PlacementTarget as FrameworkElement)?.DataContext as DomainItem);
+        }
+
+        if (sender is MenuItem menuItem && menuItem.Parent is ContextMenu parentContextMenu)
+        {
+            if (parentContextMenu.PlacementTarget is TreeView treeView)
+            {
+                return ResolveSelectableDomain(treeView.SelectedItem as DomainItem);
+            }
+
+            return ResolveSelectableDomain((parentContextMenu.PlacementTarget as FrameworkElement)?.DataContext as DomainItem);
+        }
+
+        return null;
+    }
+
+    private string BuildBranchClipboardText(DomainItem rootDomain)
+    {
+        var lines = new List<string>();
+        AppendBranchClipboardLines(rootDomain, lines, 0);
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static void AppendBranchClipboardLines(DomainItem domain, List<string> lines, int depth)
+    {
+        var indent = new string(' ', depth * 2);
+        lines.Add($"{indent}- {domain.DisplayName} [{domain.DomainCode}] ({domain.DomainType})");
+
+        if (!string.IsNullOrWhiteSpace(domain.Description))
+        {
+            lines.Add($"{indent}  {domain.Description.Trim()}");
+        }
+
+        foreach (var child in domain.ChildDomains
+                     .OrderBy(item => item.DisplayOrder)
+                     .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
+        {
+            AppendBranchClipboardLines(child, lines, depth + 1);
         }
     }
 
