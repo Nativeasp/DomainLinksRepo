@@ -68,6 +68,8 @@ public partial class DomainStoreWindow : Window
         {
             BackendBaseUrl = _settings.BackendBaseUrl,
             OllamaBaseUrl = _settings.OllamaBaseUrl,
+            BackendFallbackUrls = _settings.BackendFallbackUrls,
+            OllamaFallbackUrls = _settings.OllamaFallbackUrls,
             WindowWidth = _settings.WindowWidth,
             WindowHeight = _settings.WindowHeight,
             WindowLeft = _settings.WindowLeft,
@@ -117,8 +119,7 @@ public partial class DomainStoreWindow : Window
             var selectedDomain = FindDomainByCode(domainCodeToSelect)
                 ?? _selectedDomain?.SourceDomain
                 ?? _selectedDomain
-                ?? _sharedRootDomains.FirstOrDefault()
-                ?? _clientRootDomains.FirstOrDefault();
+                ?? GetFirstRealDomain();
             if (selectedDomain is not null)
             {
                 SelectDomain(selectedDomain);
@@ -201,6 +202,15 @@ public partial class DomainStoreWindow : Window
         ApplyDomainSearchFilter();
     }
 
+    private DomainItem? GetFirstRealDomain()
+    {
+        return _allRootDomains
+            .OrderBy(item => GetDomainTypeSortBucket(item.DomainType))
+            .ThenBy(item => item.DisplayOrder)
+            .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
     private DomainItem? FindDomainByCode(string? domainCode)
     {
         if (string.IsNullOrWhiteSpace(domainCode))
@@ -235,6 +245,11 @@ public partial class DomainStoreWindow : Window
 
     private void SelectDomain(DomainItem domain)
     {
+        if (domain.IsGroup)
+        {
+            return;
+        }
+
         _selectedDomain = domain;
         ExpandAncestors(domain);
         SharedDomainTreeView.UpdateLayout();
@@ -356,9 +371,21 @@ public partial class DomainStoreWindow : Window
 
         if (!hasSearch)
         {
-            foreach (var rootDomain in _allRootDomains)
+            foreach (var group in _allRootDomains
+                         .GroupBy(domain => string.IsNullOrWhiteSpace(domain.DomainType) ? "Unclassified" : domain.DomainType)
+                         .OrderBy(group => GetDomainTypeSortBucket(group.Key))
+                         .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
             {
-                AddDomainToOrientationSection(rootDomain);
+                var groupNode = CreateDomainTypeGroup(group.Key);
+                foreach (var rootDomain in group
+                             .OrderBy(domain => domain.DisplayOrder)
+                             .ThenBy(domain => domain.DisplayName, StringComparer.OrdinalIgnoreCase))
+                {
+                    rootDomain.ParentDomain = groupNode;
+                    groupNode.ChildDomains.Add(rootDomain);
+                }
+
+                _sharedRootDomains.Add(groupNode);
             }
 
             return;
@@ -369,19 +396,20 @@ public partial class DomainStoreWindow : Window
                      .Where(domain => DomainFieldMatches(domain, searchText))
                      .OrderBy(domain => domain.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            AddDomainToOrientationSection(CreateSearchResultItem(match));
+            _sharedRootDomains.Add(CreateSearchResultItem(match));
         }
     }
 
-    private void AddDomainToOrientationSection(DomainItem domain)
+    private static DomainItem CreateDomainTypeGroup(string domainType)
     {
-        if (string.Equals(domain.DomainOrientationCode, "CLIENT_SERVICES", StringComparison.OrdinalIgnoreCase))
+        return new DomainItem
         {
-            _clientRootDomains.Add(domain);
-            return;
-        }
-
-        _sharedRootDomains.Add(domain);
+            DomainCode = $"domain-type-{SlugifyForGroup(domainType)}",
+            DisplayName = domainType,
+            DomainType = domainType,
+            IsExpanded = true,
+            IsGroup = true,
+        };
     }
 
     private static DomainItem CreateSearchResultItem(DomainItem source)
@@ -400,13 +428,17 @@ public partial class DomainStoreWindow : Window
             DisplayName = source.DisplayName,
             Description = source.Description,
             Status = source.Status,
+            IsGroup = source.IsGroup,
             SourceDomain = source,
         };
     }
 
     private static bool DomainFieldMatches(DomainItem domain, string searchText)
     {
-        return domain.DisplayName?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false;
+        return (domain.DisplayName?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (domain.DomainCode?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (domain.DomainType?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (domain.Description?.Contains(searchText, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
     private void SetExpandedRecursive(DomainItem domain, bool isExpanded)
@@ -467,7 +499,7 @@ public partial class DomainStoreWindow : Window
 
     private async void AddSharedRootButton_OnClick(object sender, RoutedEventArgs e)
     {
-        await CreateDomainAsync(null, GetOrientationIdByCode("SHARED_SERVICES"));
+        await CreateDomainAsync(null, null);
     }
 
     private async void AddClientRootButton_OnClick(object sender, RoutedEventArgs e)
@@ -542,12 +574,6 @@ public partial class DomainStoreWindow : Window
 
     private async Task CreateDomainAsync(DomainItem? parentDomain, int? domainOrientationId)
     {
-        if (parentDomain is null && domainOrientationId is null)
-        {
-            MessageBox.Show(this, "A domain orientation is required for a new root domain.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
         var prompt = new TextPromptWindow(
             parentDomain is null ? "New Root Domain" : "New Child Domain",
             parentDomain is null ? "Root domain name" : $"Child domain name under {parentDomain.DisplayName}",
@@ -566,7 +592,7 @@ public partial class DomainStoreWindow : Window
                 new
                 {
                     domainCode = Slugify(domainName),
-                    domainTypeId = parentDomain?.DomainTypeId,
+                    domainTypeId = parentDomain?.DomainTypeId ?? GetSelectedDomainTypeId() ?? GetDefaultDomainTypeId(),
                     domainOrientationId,
                     domainParentId = parentDomain?.DomainId,
                     displayName = domainName,
@@ -855,6 +881,15 @@ public partial class DomainStoreWindow : Window
         return DomainTypeComboBox.SelectedValue is int value ? value : null;
     }
 
+    private int? GetDefaultDomainTypeId()
+    {
+        return _domainTypes
+            .OrderBy(item => GetDomainTypeSortBucket(item))
+            .ThenBy(item => item.DisplayOrder)
+            .FirstOrDefault()
+            ?.Id;
+    }
+
     private async Task ReorderSiblingDomainsAsync(TreeView treeView, DomainItem sourceDomain, DomainItem targetDomain, bool insertAfter)
     {
         if (_isReorderingRoots)
@@ -868,7 +903,9 @@ public partial class DomainStoreWindow : Window
             return;
         }
 
-        if (!string.Equals(sourceDomain.ParentDomain?.DomainId, targetDomain.ParentDomain?.DomainId, StringComparison.OrdinalIgnoreCase))
+        var sourceParentId = GetEffectiveParentDomainId(sourceDomain);
+        var targetParentId = GetEffectiveParentDomainId(targetDomain);
+        if (!string.Equals(sourceParentId, targetParentId, StringComparison.OrdinalIgnoreCase))
         {
             StatusTextBlock.Text = "Only sibling domains can be reordered.";
             return;
@@ -892,9 +929,7 @@ public partial class DomainStoreWindow : Window
         insertIndex = Math.Max(0, Math.Min(insertIndex, siblings.Count));
         siblings.Insert(insertIndex, sourceDomain);
 
-        var orientationCode = sourceDomain.ParentDomain is null
-            ? treeView == SharedDomainTreeView ? "SHARED_SERVICES" : "CLIENT_SERVICES"
-            : null;
+        string? orientationCode = null;
 
         try
         {
@@ -905,7 +940,7 @@ public partial class DomainStoreWindow : Window
                 "/domain-sibling-order",
                 new
                 {
-                    parentDomainId = sourceDomain.ParentDomain?.DomainId,
+                    parentDomainId = sourceParentId,
                     orientationCode,
                     orderedDomainCodes = siblings.Select(item => item.DomainCode).ToList(),
                 });
@@ -973,10 +1008,8 @@ public partial class DomainStoreWindow : Window
         }
 
         var selectedTreeDomain =
-            (SharedDomainTreeView.SelectedItem as DomainItem)?.SourceDomain
-            ?? SharedDomainTreeView.SelectedItem as DomainItem
-            ?? (ClientDomainTreeView.SelectedItem as DomainItem)?.SourceDomain
-            ?? ClientDomainTreeView.SelectedItem as DomainItem;
+            ResolveSelectableDomain(SharedDomainTreeView.SelectedItem as DomainItem)
+            ?? ResolveSelectableDomain(ClientDomainTreeView.SelectedItem as DomainItem);
 
         if (selectedTreeDomain is not null)
         {
@@ -1008,16 +1041,47 @@ public partial class DomainStoreWindow : Window
             ?.Id;
     }
 
+    private static string? GetEffectiveParentDomainId(DomainItem domain)
+    {
+        return domain.ParentDomain is null || domain.ParentDomain.IsGroup
+            ? null
+            : domain.ParentDomain.DomainId;
+    }
+
+    private static DomainItem? ResolveSelectableDomain(DomainItem? domain)
+    {
+        var resolved = domain?.SourceDomain ?? domain;
+        return resolved is null || resolved.IsGroup ? null : resolved;
+    }
+
     private static int GetDomainTypeSortBucket(DomainTypeItem item)
     {
-        var code = item.Code?.Trim().ToUpperInvariant() ?? string.Empty;
+        return GetDomainTypeSortBucket(item.Code);
+    }
+
+    private static int GetDomainTypeSortBucket(string? domainType)
+    {
+        var code = domainType?.Trim().ToUpperInvariant() ?? string.Empty;
         return code switch
         {
-            "STRATEGIC" => 0,
-            "TACTICAL" => 98,
-            "OPERATIONAL" => 99,
+            "EXECUTIVE" => 10,
+            "CORPORATE" => 20,
+            "SERVICE" => 30,
             _ => 50,
         };
+    }
+
+    private static string SlugifyForGroup(string value)
+    {
+        var slug = string.Concat(value.Trim().ToLowerInvariant().Select(ch =>
+            char.IsLetterOrDigit(ch) ? ch : '-'));
+        while (slug.Contains("--", StringComparison.Ordinal))
+        {
+            slug = slug.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        slug = slug.Trim('-');
+        return string.IsNullOrWhiteSpace(slug) ? "unclassified" : slug;
     }
 
     private async void GenerateAssistButton_OnClick(object sender, RoutedEventArgs e)
@@ -1143,7 +1207,10 @@ public partial class DomainStoreWindow : Window
     {
         if (e.NewValue is DomainItem domain)
         {
-            SelectDomain(domain.SourceDomain ?? domain);
+            if (!domain.IsGroup)
+            {
+                SelectDomain(domain.SourceDomain ?? domain);
+            }
         }
     }
 
@@ -1164,6 +1231,11 @@ public partial class DomainStoreWindow : Window
         }
 
         var resolvedDomain = domain.SourceDomain ?? domain;
+        if (resolvedDomain.IsGroup)
+        {
+            return;
+        }
+
         _pendingDragDomain = resolvedDomain;
     }
 
@@ -1209,8 +1281,10 @@ public partial class DomainStoreWindow : Window
 
         if (sourceDomain is null
             || resolvedTarget is null
+            || sourceDomain.IsGroup
+            || resolvedTarget.IsGroup
             || string.Equals(sourceDomain.DomainCode, resolvedTarget.DomainCode, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(sourceDomain.ParentDomain?.DomainId, resolvedTarget.ParentDomain?.DomainId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(GetEffectiveParentDomainId(sourceDomain), GetEffectiveParentDomainId(resolvedTarget), StringComparison.OrdinalIgnoreCase)
             || (sourceDomain.ParentDomain is null
                 && !string.Equals(sourceDomain.DomainOrientationCode, resolvedTarget.DomainOrientationCode, StringComparison.OrdinalIgnoreCase)))
         {
@@ -1235,7 +1309,7 @@ public partial class DomainStoreWindow : Window
         var sourceDomain = e.Data.GetData(typeof(DomainItem)) as DomainItem;
         var targetItem = GetTreeViewItemFromSource(treeView, e.OriginalSource as DependencyObject);
         var targetDomain = (targetItem?.DataContext as DomainItem)?.SourceDomain ?? targetItem?.DataContext as DomainItem;
-        if (sourceDomain is null || targetDomain is null)
+        if (sourceDomain is null || targetDomain is null || sourceDomain.IsGroup || targetDomain.IsGroup)
         {
             return;
         }

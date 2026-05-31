@@ -19,6 +19,14 @@ Create a virtual environment, install dependencies, then run:
 uvicorn app.main:app --reload --host 127.0.0.1 --port 5056
 ```
 
+Use `127.0.0.1` when the desktop app and backend run inside the same Windows VM. If the backend must be reached from the Mac host or another device, bind to `0.0.0.0` and allow the port through Windows Firewall:
+
+```powershell
+uvicorn app.main:app --reload --host 0.0.0.0 --port 5056
+```
+
+With Parallels Shared Network, the Mac host is commonly reachable from the Windows VM at `10.211.55.2`; bridged networking uses the router-provided address and can change when Wi-Fi networks change.
+
 Health check:
 
 ```text

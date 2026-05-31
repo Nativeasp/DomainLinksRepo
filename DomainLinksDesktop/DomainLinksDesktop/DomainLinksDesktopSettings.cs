@@ -3,10 +3,22 @@ using System.Text.Json;
 
 namespace DomainLinksDesktop;
 
-internal sealed class DomainLinksDesktopSettings
+internal sealed record DomainLinksDesktopSettings
 {
     public string BackendBaseUrl { get; init; } = "http://127.0.0.1:5056";
     public string OllamaBaseUrl { get; init; } = "http://10.211.55.2:11434";
+    public string[] BackendFallbackUrls { get; init; } =
+    [
+        "http://127.0.0.1:5056",
+        "http://localhost:5056",
+        "http://10.211.55.2:5056",
+    ];
+    public string[] OllamaFallbackUrls { get; init; } =
+    [
+        "http://10.211.55.2:11434",
+        "http://127.0.0.1:11434",
+        "http://localhost:11434",
+    ];
     public double WindowWidth { get; init; } = 1420;
     public double WindowHeight { get; init; } = 820;
     public double WindowLeft { get; init; } = double.NaN;
@@ -44,6 +56,8 @@ internal sealed class DomainLinksDesktopSettings
             {
                 BackendBaseUrl = NormalizeUrl(settings.BackendBaseUrl, "http://127.0.0.1:5056"),
                 OllamaBaseUrl = NormalizeUrl(settings.OllamaBaseUrl, "http://10.211.55.2:11434"),
+                BackendFallbackUrls = NormalizeUrls(settings.BackendFallbackUrls, DefaultBackendFallbackUrls()),
+                OllamaFallbackUrls = NormalizeUrls(settings.OllamaFallbackUrls, DefaultOllamaFallbackUrls()),
                 WindowWidth = settings.WindowWidth > 0 ? settings.WindowWidth : 1420,
                 WindowHeight = settings.WindowHeight > 0 ? settings.WindowHeight : 820,
                 WindowLeft = settings.WindowLeft,
@@ -70,8 +84,29 @@ internal sealed class DomainLinksDesktopSettings
     public void Save()
     {
         var settingsPath = Path.Combine(AppContext.BaseDirectory, "domainlinks-desktop.settings.json");
-        var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(ToPersistedSettings(), new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(settingsPath, json);
+    }
+
+    private DomainLinksDesktopSettings ToPersistedSettings()
+    {
+        return this with
+        {
+            WindowWidth = PositiveOrDefault(WindowWidth, 1420),
+            WindowHeight = PositiveOrDefault(WindowHeight, 820),
+            WindowLeft = FiniteOrDefault(WindowLeft, 0),
+            WindowTop = FiniteOrDefault(WindowTop, 0),
+            LeftPaneWidth = PositiveOrDefault(LeftPaneWidth, 280),
+            RightPaneWidth = PositiveOrDefault(RightPaneWidth, 320),
+            PromptPaneHeight = PositiveOrDefault(PromptPaneHeight, 160),
+            DomainStoreWindowWidth = PositiveOrDefault(DomainStoreWindowWidth, 1500),
+            DomainStoreWindowHeight = PositiveOrDefault(DomainStoreWindowHeight, 860),
+            DomainStoreWindowLeft = FiniteOrDefault(DomainStoreWindowLeft, 0),
+            DomainStoreWindowTop = FiniteOrDefault(DomainStoreWindowTop, 0),
+            DomainStoreLeftPaneWidth = PositiveOrDefault(DomainStoreLeftPaneWidth, 300),
+            DomainStoreCenterPaneWidth = PositiveOrDefault(DomainStoreCenterPaneWidth, 500),
+            DomainStoreCollectionsPaneHeight = PositiveOrDefault(DomainStoreCollectionsPaneHeight, 260),
+        };
     }
 
     private static string NormalizeUrl(string? value, string fallback)
@@ -79,5 +114,40 @@ internal sealed class DomainLinksDesktopSettings
         return string.IsNullOrWhiteSpace(value)
             ? fallback
             : value.Trim().TrimEnd('/');
+    }
+
+    private static string[] NormalizeUrls(string[]? values, string[] fallback)
+    {
+        var normalized = values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim().TrimEnd('/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return normalized is { Length: > 0 } ? normalized : fallback;
+    }
+
+    private static string[] DefaultBackendFallbackUrls() =>
+    [
+        "http://127.0.0.1:5056",
+        "http://localhost:5056",
+        "http://10.211.55.2:5056",
+    ];
+
+    private static string[] DefaultOllamaFallbackUrls() =>
+    [
+        "http://10.211.55.2:11434",
+        "http://127.0.0.1:11434",
+        "http://localhost:11434",
+    ];
+
+    private static double PositiveOrDefault(double value, double fallback)
+    {
+        return double.IsFinite(value) && value > 0 ? value : fallback;
+    }
+
+    private static double FiniteOrDefault(double value, double fallback)
+    {
+        return double.IsFinite(value) ? value : fallback;
     }
 }

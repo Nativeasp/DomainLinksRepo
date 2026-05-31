@@ -96,11 +96,12 @@
                                     Height="30"
                                     Margin="0,0,8,0"
                                     Click="AddSharedRootButton_OnClick"
-                                    Content="Add Shared" />
+                                    Content="Add Root" />
                             <Button Width="96"
                                     Height="30"
                                     Margin="0,0,8,0"
                                     Click="AddClientRootButton_OnClick"
+                                    Visibility="Collapsed"
                                     Content="Add Client" />
                             <Button Width="86"
                                     Height="30"
@@ -162,16 +163,16 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="6" />
                                 <RowDefinition Height="*" />
-                                <RowDefinition Height="10" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="6" />
-                                <RowDefinition Height="*" />
+                                <RowDefinition Height="0" />
+                                <RowDefinition Height="0" />
+                                <RowDefinition Height="0" />
+                                <RowDefinition Height="0" />
                             </Grid.RowDefinitions>
 
                             <TextBlock FontSize="13"
                                        FontWeight="SemiBold"
                                        Foreground="#263746"
-                                       Text="Shared Services" />
+                                       Text="Domain Type" />
 
                             <TreeView Grid.Row="2"
                                       x:Name="SharedDomainTreeView"
@@ -189,6 +190,7 @@
                                        FontSize="13"
                                        FontWeight="SemiBold"
                                        Foreground="#263746"
+                                       Visibility="Collapsed"
                                        Text="Client Services" />
 
                             <TreeView Grid.Row="6"
@@ -200,6 +202,7 @@
                                       DragOver="DomainTreeView_OnDragOver"
                                       Drop="DomainTreeView_OnDrop"
                                       PreviewKeyDown="DomainTreeView_OnPreviewKeyDown"
+                                      Visibility="Collapsed"
                                       BorderThickness="0"
                                       Background="Transparent" />
                         </Grid>

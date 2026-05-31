@@ -41,7 +41,7 @@ public partial class MainWindow : Window
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly DomainLinksDesktopSettings _settings = DomainLinksDesktopSettings.Load();
+    private DomainLinksDesktopSettings _settings = DomainLinksDesktopSettings.Load();
     private readonly HttpClient _httpClient;
     private readonly HttpClient _ollamaHttpClient;
     private readonly ObservableCollection<CollectionItem> _projectCollections = [];
@@ -109,8 +109,28 @@ public partial class MainWindow : Window
         ResponseWebView.CoreWebView2.Settings.IsWebMessageEnabled = true;
         ResponseWebView.CoreWebView2.WebMessageReceived += ResponseWebView_OnWebMessageReceived;
         ShowEmptyResponseState("Response output will appear here.");
+        await ResolveConfiguredServiceUrlsAsync();
         await LoadShellAsync();
-        Dispatcher.BeginInvoke(new Action(OpenDomainStore), DispatcherPriority.Background);
+    }
+
+    private async Task ResolveConfiguredServiceUrlsAsync()
+    {
+        var backendBaseUrl = await NetworkEndpointResolver.ResolveHttpBaseUrlAsync(
+            _settings.BackendBaseUrl,
+            _settings.BackendFallbackUrls,
+            "/health");
+        var ollamaBaseUrl = await NetworkEndpointResolver.ResolveHttpBaseUrlAsync(
+            _settings.OllamaBaseUrl,
+            _settings.OllamaFallbackUrls,
+            "/api/tags");
+
+        _settings = _settings with
+        {
+            BackendBaseUrl = backendBaseUrl,
+            OllamaBaseUrl = ollamaBaseUrl,
+        };
+        _httpClient.BaseAddress = new Uri(_settings.BackendBaseUrl);
+        _ollamaHttpClient.BaseAddress = new Uri(_settings.OllamaBaseUrl);
     }
 
     private void MainWindow_OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -119,6 +139,8 @@ public partial class MainWindow : Window
         {
             BackendBaseUrl = _settings.BackendBaseUrl,
             OllamaBaseUrl = _settings.OllamaBaseUrl,
+            BackendFallbackUrls = _settings.BackendFallbackUrls,
+            OllamaFallbackUrls = _settings.OllamaFallbackUrls,
             WindowWidth = Width,
             WindowHeight = Height,
             WindowLeft = Left,
@@ -173,7 +195,20 @@ public partial class MainWindow : Window
         {
             BackendStatusTextBox.Text = "Unavailable";
             BackendDetailTextBox.Text = $"Backend URL: {_settings.BackendBaseUrl}\nBackend: {ex.Message}\nOllama URL: {_settings.OllamaBaseUrl}\nOllama: {await GetOllamaStatusAsync()}";
-            _availableModels.Clear();
+            await LoadAvailableModelsAsync();
+
+            _projectCollections.Clear();
+            _capabilityDomains.Clear();
+            RestoreLocalProjectChats();
+            if (_projectCollections.Count > 0)
+            {
+                var firstThread = _projectCollections[0].Threads.FirstOrDefault();
+                SelectTreeItem(firstThread is not null ? firstThread : _projectCollections[0]);
+            }
+            else
+            {
+                await ShowProjectCollectionStateAsync(null);
+            }
         }
     }
 
@@ -770,7 +805,14 @@ public partial class MainWindow : Window
 
     private async Task<List<DocumentListItem>> LoadDocumentsAsync(string collectionCode)
     {
-        return await _httpClient.GetFromJsonAsync<List<DocumentListItem>>($"/documents?collectionCode={Uri.EscapeDataString(collectionCode)}") ?? [];
+        try
+        {
+            return await _httpClient.GetFromJsonAsync<List<DocumentListItem>>($"/documents?collectionCode={Uri.EscapeDataString(collectionCode)}") ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     private async Task<List<ContentUnitListItem>> LoadDocumentChunksAsync(string documentId)
@@ -1702,14 +1744,30 @@ public partial class MainWindow : Window
             }
         }
 
-        foreach (var domain in domains
+        foreach (var group in domains
                      .Where(domain =>
                          !string.Equals(domain.DomainCode, "workspace-memory", StringComparison.OrdinalIgnoreCase)
                          && string.IsNullOrWhiteSpace(domain.DomainParentId))
-                     .OrderBy(domain => domain.DisplayOrder)
-                     .ThenBy(domain => domain.DisplayName, StringComparer.OrdinalIgnoreCase))
+                     .GroupBy(domain => string.IsNullOrWhiteSpace(domain.DomainType) ? "Unclassified" : domain.DomainType)
+                     .OrderBy(group => GetDomainTypeSortBucket(group.Key))
+                     .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
         {
-            _capabilityDomains.Add(domain);
+            var groupNode = CreateDomainTypeGroup(group.Key);
+            foreach (var rootDomain in group
+                         .OrderBy(domain => domain.DisplayOrder)
+                         .ThenBy(domain => domain.DisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                rootDomain.ParentDomain = groupNode;
+                groupNode.ChildDomains.Add(rootDomain);
+                groupNode.TreeChildren.Add(rootDomain);
+            }
+
+            _capabilityDomains.Add(groupNode);
+        }
+
+        foreach (var domain in _capabilityDomains)
+        {
+            RefreshDomainSelectionState(domain);
         }
 
         foreach (var collection in collections
@@ -1719,11 +1777,36 @@ public partial class MainWindow : Window
             collection.IsExpanded = true;
             _projectCollections.Add(collection);
         }
+    }
 
-        foreach (var domain in _capabilityDomains)
+    private static DomainItem CreateDomainTypeGroup(string domainType)
+    {
+        return new DomainItem
         {
-            RefreshDomainSelectionState(domain);
-        }
+            DomainCode = $"domain-type-{SlugifyForGroup(domainType)}",
+            DisplayName = domainType,
+            DomainType = domainType,
+            IsExpanded = true,
+            IsGroup = true,
+        };
+    }
+
+    private static int GetDomainTypeSortBucket(string domainType)
+    {
+        return domainType.Trim().ToUpperInvariant() switch
+        {
+            "EXECUTIVE" => 10,
+            "CORPORATE" => 20,
+            "SERVICE" => 30,
+            _ => 99,
+        };
+    }
+
+    private static string SlugifyForGroup(string value)
+    {
+        var slug = Regex.Replace(value.Trim().ToLowerInvariant(), @"[^\w\s-]+", string.Empty);
+        slug = Regex.Replace(slug, @"\s+", "-").Trim('-');
+        return string.IsNullOrWhiteSpace(slug) ? "unclassified" : slug;
     }
 
     private void ApplyDomainSelection(DomainItem domain, bool isIncluded)
@@ -2112,7 +2195,16 @@ public partial class MainWindow : Window
         {
             if (!collectionsByCode.TryGetValue(state.RootCollectionCode, out var collection))
             {
-                continue;
+                collection = new CollectionItem
+                {
+                    CollectionCode = state.RootCollectionCode,
+                    DisplayName = string.IsNullOrWhiteSpace(state.RootDisplayName) ? state.RootCollectionCode : state.RootDisplayName,
+                    Description = "Local chat history loaded while the backend is unavailable.",
+                    DomainCode = "local",
+                    DomainDisplayName = "Local chats",
+                };
+                _projectCollections.Add(collection);
+                collectionsByCode[state.RootCollectionCode] = collection;
             }
 
             collection.Threads.Clear();

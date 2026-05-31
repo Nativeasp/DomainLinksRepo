@@ -22,6 +22,7 @@ public sealed class DomainItem : INotifyPropertyChanged
     private bool? _isIncluded;
     private bool _isExpanded;
     private bool _isSelected;
+    private bool _isGroup;
 
     public string DomainId
     {
@@ -110,6 +111,12 @@ public sealed class DomainItem : INotifyPropertyChanged
     {
         get => _isSelected;
         set => SetField(ref _isSelected, value);
+    }
+
+    public bool IsGroup
+    {
+        get => _isGroup;
+        set => SetField(ref _isGroup, value);
     }
 
     [JsonIgnore]
