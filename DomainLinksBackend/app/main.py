@@ -13,6 +13,7 @@ from .db import ping_database
 from .document_ingest import extract_pdf_text
 from .repositories import (
     archive_document,
+    create_control_from_suggestion,
     create_collection,
     create_domain,
     create_text_document,
@@ -20,6 +21,7 @@ from .repositories import (
     delete_domain,
     delete_content_unit,
     get_collection_delete_preview,
+    get_control_suggestion_context,
     get_domain_delete_preview,
     get_recent_context_units,
     get_domain_assist_context,
@@ -27,6 +29,8 @@ from .repositories import (
     list_collection_documents,
     list_document_chunks,
     list_collections,
+    list_controls_for_branch,
+    list_control_types,
     list_domains,
     list_domain_orientations,
     list_domain_types,
@@ -102,6 +106,25 @@ class ExecuteDomainChildSuggestionRequest(BaseModel):
     description: str | None = None
     domainType: str
     domainCode: str | None = None
+
+
+class ControlSuggestionRequest(BaseModel):
+    branchRootDomainCode: str
+    mode: str = "options"
+    idea: str | None = None
+    controlTypeCode: str | None = None
+    count: int = 5
+    model: str | None = None
+
+
+class ExecuteControlSuggestionRequest(BaseModel):
+    domainCode: str
+    controlTypeCode: str
+    displayName: str
+    description: str | None = None
+    controlObjective: str | None = None
+    evidenceExpectation: str | None = None
+    controlCode: str | None = None
 
 
 class PromptPreviewResponse(BaseModel):
@@ -368,6 +391,158 @@ def _build_child_domain_suggestion_prompt(
     return f"{system_prompt}\n\n{user_prompt}"
 
 
+def _build_control_suggestion_prompt(
+    context: dict[str, object],
+    control_types: list[dict[str, object]],
+    request: ControlSuggestionRequest,
+) -> tuple[str, str]:
+    root_domain = context.get("rootDomain") or {}
+    branch_domains = context.get("branchDomains") or []
+    existing_controls = context.get("existingControls") or []
+    count = max(1, min(request.count, 10))
+
+    domain_lines = [
+        f"- {item.get('DisplayName')} [{item.get('DomainCode')}] ({item.get('DomainType') or 'Unknown type'}): {item.get('Description') or ''}"
+        for item in branch_domains
+    ]
+    control_lines = [
+        f"- {item.get('DisplayName')} [{item.get('ControlCode')}] type={item.get('ControlTypeCode')} domain={item.get('DomainCode')}"
+        for item in existing_controls
+    ]
+    allowed_type_lines = [
+        f"- {item.get('CODE')}: {item.get('NAME')} - {item.get('DESCRIPTION') or ''}"
+        for item in control_types
+        if item.get("CODE")
+    ]
+    requested_type = (request.controlTypeCode or "").strip().upper()
+    type_instruction = (
+        f'Every suggestion must use this controlTypeCode: "{requested_type}".'
+        if requested_type and requested_type != "ANY"
+        else "Use the most appropriate controlTypeCode from the allowed list."
+    )
+    idea_instruction = (
+        f"User idea/focus:\n{request.idea.strip()}\n\n"
+        if request.idea and request.idea.strip()
+        else "User idea/focus:\nNone. Suggest useful options from the branch context.\n\n"
+    )
+
+    system_prompt = (
+        "You are helping design business controls for an internal control manager.\n\n"
+        "Return only valid JSON in this exact structure:\n"
+        "{\n"
+        '  "suggestions": [\n'
+        "    {\n"
+        '      "displayName": "Control title",\n'
+        '      "controlTypeCode": "PREVENTIVE",\n'
+        '      "domainCode": "domain-code",\n'
+        '      "description": "Short description",\n'
+        '      "controlObjective": "What this control is meant to achieve",\n'
+        '      "evidenceExpectation": "Evidence expected to prove operation"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "Rules:\n"
+        "- Return only JSON. Do not wrap JSON in markdown fences.\n"
+        "- Suggest practical, auditable controls that fit the selected domain.\n"
+        "- Do not duplicate existing controls.\n"
+        '- domainCode must exactly equal the selected root domain code shown in "Branch root".\n'
+        "- controlTypeCode must be one of the allowed control type codes.\n"
+        "- Keep displayName concise and business-readable.\n"
+        "- Evidence must be concrete enough that a person could inspect it."
+    )
+    user_prompt = (
+        f"Branch root: {root_domain.get('DisplayName') or ''} [{root_domain.get('DomainCode') or ''}]\n"
+        f"Mode: {request.mode}\n"
+        f"Suggestion count: {count}\n"
+        f"{type_instruction}\n\n"
+        f"{idea_instruction}"
+        f"Allowed control types:\n{chr(10).join(allowed_type_lines) if allowed_type_lines else 'None'}\n\n"
+        f"Branch domains:\n{chr(10).join(domain_lines) if domain_lines else 'None'}\n\n"
+        f"Existing controls:\n{chr(10).join(control_lines) if control_lines else 'None'}\n\n"
+        f"Return exactly {count} suggestions."
+    )
+    return system_prompt, user_prompt
+
+
+def _build_control_suggestion_prompt_text(
+    context: dict[str, object],
+    control_types: list[dict[str, object]],
+    request: ControlSuggestionRequest,
+) -> str:
+    system_prompt, user_prompt = _build_control_suggestion_prompt(context, control_types, request)
+    return f"{system_prompt}\n\n{user_prompt}"
+
+
+def _build_control_insert_preview(
+    domain_code: str,
+    control_type_code: str,
+    control_code: str,
+    display_name: str,
+    description: str | None,
+    control_objective: str | None,
+    evidence_expectation: str | None,
+) -> str:
+    domain_literal = _sql_nvarchar_literal(domain_code)
+    type_literal = _sql_nvarchar_literal(control_type_code)
+    code_literal = _sql_nvarchar_literal(control_code)
+    name_literal = _sql_nvarchar_literal(display_name)
+    description_literal = _sql_nvarchar_literal(description)
+    objective_literal = _sql_nvarchar_literal(control_objective)
+    evidence_literal = _sql_nvarchar_literal(evidence_expectation)
+
+    return (
+        f"DECLARE @DomainCode NVARCHAR(100) = {domain_literal};\n"
+        f"DECLARE @ControlTypeCode NVARCHAR(50) = {type_literal};\n"
+        f"DECLARE @ControlCode NVARCHAR(100) = {code_literal};\n\n"
+        "DECLARE @CreatedControl TABLE (ControlId UNIQUEIDENTIFIER);\n\n"
+        "INSERT INTO dbo.Controls (\n"
+        "    ControlTypeId,\n"
+        "    ControlCode,\n"
+        "    DisplayName,\n"
+        "    Description,\n"
+        "    ControlObjective,\n"
+        "    EvidenceExpectation,\n"
+        "    Status\n"
+        ")\n"
+        "OUTPUT inserted.ControlId INTO @CreatedControl\n"
+        "SELECT\n"
+        "    ct.ID,\n"
+        f"    @ControlCode,\n"
+        f"    {name_literal},\n"
+        f"    {description_literal},\n"
+        f"    {objective_literal},\n"
+        f"    {evidence_literal},\n"
+        "    'Active'\n"
+        "FROM dbo.ControlTypes ct\n"
+        "WHERE ct.CODE = @ControlTypeCode\n"
+        "  AND NOT EXISTS (\n"
+        "      SELECT 1\n"
+        "      FROM dbo.Controls existing\n"
+        "      WHERE existing.ControlCode = @ControlCode\n"
+        "  );\n\n"
+        "INSERT INTO dbo.DomainControls (\n"
+        "    DomainId,\n"
+        "    ControlId,\n"
+        "    RelationshipType,\n"
+        "    IsPrimary,\n"
+        "    DisplayOrder\n"
+        ")\n"
+        "SELECT\n"
+        "    d.DomainId,\n"
+        "    c.ControlId,\n"
+        "    'Primary',\n"
+        "    1,\n"
+        "    COALESCE((\n"
+        "        SELECT MAX(existing.DisplayOrder) + 10\n"
+        "        FROM dbo.DomainControls existing\n"
+        "        WHERE existing.DomainId = d.DomainId\n"
+        "    ), 10)\n"
+        "FROM dbo.Domains d\n"
+        "CROSS JOIN @CreatedControl c\n"
+        "WHERE d.DomainCode = @DomainCode;"
+    )
+
+
 def _extract_json_object(raw_text: str) -> dict[str, object]:
     text = (raw_text or "").strip()
     if text.startswith("```"):
@@ -495,6 +670,125 @@ def create_app() -> FastAPI:
     @app.get("/domain-orientations")
     def domain_orientations() -> list[dict[str, object]]:
         return list_domain_orientations(settings)
+
+    @app.get("/control-types")
+    def control_types() -> list[dict[str, object]]:
+        return list_control_types(settings)
+
+    @app.get("/controls")
+    def controls(branchRootDomainCode: str) -> list[dict[str, object]]:
+        try:
+            return list_controls_for_branch(settings, branchRootDomainCode)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/controls/suggest")
+    def suggest_controls(request: ControlSuggestionRequest) -> dict[str, object]:
+        try:
+            context = get_control_suggestion_context(settings, request.branchRootDomainCode)
+            control_types = list_control_types(settings)
+            prompt = _build_control_suggestion_prompt_text(context, control_types, request)
+            payload = _generate_with_ollama(settings, prompt, model=request.model)
+            parsed = _extract_json_object(str(payload.get("response") or ""))
+            suggestions = parsed.get("suggestions")
+            if not isinstance(suggestions, list):
+                raise ValueError("The model response did not include a suggestions array.")
+
+            allowed_type_codes = {
+                str(item.get("CODE") or "").upper()
+                for item in control_types
+                if item.get("CODE")
+            }
+            branch_domain_codes = {
+                str(item.get("DomainCode") or "")
+                for item in context.get("branchDomains", [])
+                if item.get("DomainCode")
+            }
+            root_domain_code = _slugify_code(str(context.get("rootDomain", {}).get("DomainCode") or request.branchRootDomainCode))
+            normalized_suggestions: list[dict[str, object]] = []
+            for item in suggestions[: max(1, min(request.count, 10))]:
+                if not isinstance(item, dict):
+                    continue
+                display_name = str(item.get("displayName") or "").strip()
+                control_type_code = str(item.get("controlTypeCode") or "").strip().upper()
+                if (
+                    not display_name
+                    or control_type_code not in allowed_type_codes
+                    or root_domain_code not in branch_domain_codes
+                ):
+                    continue
+                normalized_suggestions.append(
+                    {
+                        "displayName": display_name,
+                        "controlTypeCode": control_type_code,
+                        "domainCode": root_domain_code,
+                        "controlCode": _slugify_code(f"{root_domain_code}-{display_name}")[:100],
+                        "description": str(item.get("description") or "").strip(),
+                        "controlObjective": str(item.get("controlObjective") or "").strip(),
+                        "evidenceExpectation": str(item.get("evidenceExpectation") or "").strip(),
+                    }
+                )
+
+            for suggestion in normalized_suggestions:
+                suggestion["sqlPreview"] = _build_control_insert_preview(
+                    domain_code=str(suggestion["domainCode"]),
+                    control_type_code=str(suggestion["controlTypeCode"]),
+                    control_code=str(suggestion["controlCode"]),
+                    display_name=str(suggestion["displayName"]),
+                    description=str(suggestion["description"]),
+                    control_objective=str(suggestion["controlObjective"]),
+                    evidence_expectation=str(suggestion["evidenceExpectation"]),
+                )
+
+            return {
+                "suggestions": normalized_suggestions,
+                "metrics": _extract_metrics(payload, request.model),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/controls/suggest-preview")
+    def preview_control_suggestion(request: ControlSuggestionRequest) -> PromptPreviewResponse:
+        try:
+            context = get_control_suggestion_context(settings, request.branchRootDomainCode)
+            control_types = list_control_types(settings)
+            system_prompt, user_prompt = _build_control_suggestion_prompt(context, control_types, request)
+            return PromptPreviewResponse(
+                model=request.model or settings.ollama_chat_model,
+                systemPrompt=system_prompt,
+                userPrompt=user_prompt,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/controls/suggest/execute")
+    def execute_control_suggestion(request: ExecuteControlSuggestionRequest) -> dict[str, object]:
+        try:
+            control_code = request.controlCode or _slugify_code(f"{request.domainCode}-{request.displayName}")
+            created_control = create_control_from_suggestion(
+                settings,
+                domain_code=request.domainCode,
+                control_type_code=request.controlTypeCode,
+                control_code=control_code,
+                display_name=request.displayName,
+                description=request.description,
+                control_objective=request.controlObjective,
+                evidence_expectation=request.evidenceExpectation,
+            )
+            return {
+                "createdControl": created_control,
+                "sqlPreview": _build_control_insert_preview(
+                    domain_code=request.domainCode,
+                    control_type_code=request.controlTypeCode,
+                    control_code=control_code,
+                    display_name=request.displayName,
+                    description=request.description,
+                    control_objective=request.controlObjective,
+                    evidence_expectation=request.evidenceExpectation,
+                ),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/domains")
     def add_domain(request: CreateDomainRequest) -> dict[str, object]:

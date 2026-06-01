@@ -158,6 +158,15 @@ public sealed class DomainTypeItem
     public int DisplayOrder { get; set; }
 }
 
+public sealed class ControlTypeItem
+{
+    public int Id { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int DisplayOrder { get; set; }
+}
+
 public sealed class DomainOrientationItem
 {
     public int Id { get; set; }
@@ -450,6 +459,49 @@ public sealed class DomainChildExecutionResponse
 {
     public DomainItem? CreatedDomain { get; set; }
     public string SqlPreview { get; set; } = string.Empty;
+}
+
+public sealed class ControlSuggestionItem
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string ControlTypeCode { get; set; } = string.Empty;
+    public string ControlTypeDescription { get; set; } = string.Empty;
+    public string DomainCode { get; set; } = string.Empty;
+    public string ControlCode { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string ControlObjective { get; set; } = string.Empty;
+    public string EvidenceExpectation { get; set; } = string.Empty;
+    public string SqlPreview { get; set; } = string.Empty;
+}
+
+public sealed class ControlSuggestionResponse
+{
+    public List<ControlSuggestionItem> Suggestions { get; set; } = [];
+    public AskResponseMetrics? Metrics { get; set; }
+}
+
+public sealed class ControlExecutionResponse
+{
+    public ControlListItem? CreatedControl { get; set; }
+    public string SqlPreview { get; set; } = string.Empty;
+}
+
+public sealed class ControlListItem
+{
+    public string ControlId { get; set; } = string.Empty;
+    public int ControlTypeId { get; set; }
+    public string ControlCode { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string ControlObjective { get; set; } = string.Empty;
+    public string EvidenceExpectation { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string ControlTypeCode { get; set; } = string.Empty;
+    public string ControlTypeName { get; set; } = string.Empty;
+    public string ControlTypeDescription { get; set; } = string.Empty;
+    public string DomainCode { get; set; } = string.Empty;
+    public string DomainDisplayName { get; set; } = string.Empty;
+    public bool IsCurrentDomainControl { get; set; }
 }
 
 public sealed class PromptPreviewResponse

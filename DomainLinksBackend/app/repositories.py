@@ -74,6 +74,278 @@ def list_domain_types(settings: Settings) -> list[dict[str, object]]:
     return [_normalize_row(row) for row in rows]
 
 
+def list_control_types(settings: Settings) -> list[dict[str, object]]:
+    rows = fetch_all(
+        settings,
+        """
+        SELECT
+            ID,
+            CODE,
+            NAME,
+            DESCRIPTION,
+            DISPLAY_ORDER
+        FROM dbo.ControlTypes
+        WHERE
+            (EFFECTIVE_END_DATE IS NULL OR EFFECTIVE_END_DATE >= CAST(SYSDATETIME() AS date))
+        ORDER BY DISPLAY_ORDER, NAME
+        """,
+    )
+    return [_normalize_row(row) for row in rows]
+
+
+def list_controls_for_branch(settings: Settings, branch_root_domain_code: str) -> list[dict[str, object]]:
+    context = get_control_suggestion_context(settings, branch_root_domain_code)
+    root_domain = context["rootDomain"]
+    root_domain_code = str(root_domain.get("DomainCode") or "")
+    domain_codes = [
+        str(domain.get("DomainCode") or "")
+        for domain in context.get("branchDomains", [])
+        if domain.get("DomainCode")
+    ]
+    if not domain_codes:
+        return []
+
+    placeholders = ", ".join("?" for _ in domain_codes)
+    rows = fetch_all(
+        settings,
+        f"""
+        SELECT
+            c.ControlId,
+            c.ControlTypeId,
+            c.ControlCode,
+            c.DisplayName,
+            c.Description,
+            c.ControlObjective,
+            c.EvidenceExpectation,
+            c.Status,
+            ct.CODE AS ControlTypeCode,
+            ct.NAME AS ControlTypeName,
+            ct.DESCRIPTION AS ControlTypeDescription,
+            d.DomainCode,
+            d.DisplayName AS DomainDisplayName,
+            CASE
+                WHEN d.DomainCode = ? THEN CAST(1 AS bit)
+                ELSE CAST(0 AS bit)
+            END AS IsCurrentDomainControl
+        FROM dbo.Controls c
+        JOIN dbo.ControlTypes ct
+            ON ct.ID = c.ControlTypeId
+        JOIN dbo.DomainControls dc
+            ON dc.ControlId = c.ControlId
+        JOIN dbo.Domains d
+            ON d.DomainId = dc.DomainId
+        WHERE d.DomainCode IN ({placeholders})
+          AND c.Status IN ('Draft', 'Active')
+        ORDER BY
+            CASE WHEN d.DomainCode = ? THEN 0 ELSE 1 END,
+            d.DisplayName,
+            c.DisplayName
+        """,
+        [root_domain_code, *domain_codes, root_domain_code],
+    )
+    return [_normalize_row(row) for row in rows]
+
+
+def get_control_suggestion_context(settings: Settings, branch_root_domain_code: str) -> dict[str, object]:
+    normalized_code = _slug_code(branch_root_domain_code)
+    domains = list_domains(settings)
+    root_domain = next((row for row in domains if row.get("DomainCode") == normalized_code), None)
+    if root_domain is None:
+        raise ValueError(f"Active domain not found for code '{branch_root_domain_code}'.")
+
+    child_domains_by_parent_id: dict[str, list[dict[str, object]]] = {}
+    for domain in domains:
+        parent_id = str(domain.get("DomainParentId") or "").strip()
+        if parent_id:
+            child_domains_by_parent_id.setdefault(parent_id, []).append(domain)
+
+    branch_domains: list[dict[str, object]] = []
+
+    def append_branch(domain: dict[str, object]) -> None:
+        branch_domains.append(domain)
+        domain_id = str(domain.get("DomainId") or "").strip()
+        for child in child_domains_by_parent_id.get(domain_id, []):
+            append_branch(child)
+
+    append_branch(root_domain)
+
+    domain_codes = [str(domain.get("DomainCode") or "") for domain in branch_domains if domain.get("DomainCode")]
+    existing_controls: list[dict[str, object]] = []
+    if domain_codes:
+        placeholders = ", ".join("?" for _ in domain_codes)
+        existing_controls = fetch_all(
+            settings,
+            f"""
+            SELECT
+                c.ControlCode,
+                c.DisplayName,
+                c.Description,
+                c.ControlObjective,
+                c.EvidenceExpectation,
+                c.Status,
+                ct.CODE AS ControlTypeCode,
+                ct.NAME AS ControlTypeName,
+                d.DomainCode,
+                d.DisplayName AS DomainDisplayName
+            FROM dbo.Controls c
+            JOIN dbo.ControlTypes ct
+                ON ct.ID = c.ControlTypeId
+            JOIN dbo.DomainControls dc
+                ON dc.ControlId = c.ControlId
+            JOIN dbo.Domains d
+                ON d.DomainId = dc.DomainId
+            WHERE d.DomainCode IN ({placeholders})
+              AND c.Status IN ('Draft', 'Active')
+            ORDER BY d.DisplayName, c.DisplayName
+            """,
+            domain_codes,
+        )
+
+    return {
+        "rootDomain": root_domain,
+        "branchDomains": [_normalize_row(domain) for domain in branch_domains],
+        "existingControls": [_normalize_row(control) for control in existing_controls],
+    }
+
+
+def create_control_from_suggestion(
+    settings: Settings,
+    domain_code: str,
+    control_type_code: str,
+    control_code: str,
+    display_name: str,
+    description: str | None,
+    control_objective: str | None,
+    evidence_expectation: str | None,
+) -> dict[str, object]:
+    normalized_domain_code = _slug_code(domain_code)
+    normalized_control_code = _slug_code(control_code)
+    normalized_type_code = re.sub(r"[^A-Z0-9_]+", "_", control_type_code.strip().upper()).strip("_")
+
+    with get_connection(settings) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SET NOCOUNT ON;
+
+            DECLARE @InsertedControls TABLE (
+                ControlId UNIQUEIDENTIFIER,
+                ControlTypeId INT,
+                ControlCode NVARCHAR(100),
+                DisplayName NVARCHAR(255),
+                Description NVARCHAR(MAX),
+                ControlObjective NVARCHAR(MAX),
+                EvidenceExpectation NVARCHAR(MAX),
+                Status NVARCHAR(30)
+            );
+
+            INSERT INTO dbo.Controls (
+                ControlTypeId,
+                ControlCode,
+                DisplayName,
+                Description,
+                ControlObjective,
+                EvidenceExpectation,
+                Status
+            )
+            OUTPUT
+                inserted.ControlId,
+                inserted.ControlTypeId,
+                inserted.ControlCode,
+                inserted.DisplayName,
+                inserted.Description,
+                inserted.ControlObjective,
+                inserted.EvidenceExpectation,
+                inserted.Status
+            INTO @InsertedControls
+            SELECT
+                ct.ID,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                'Active'
+            FROM dbo.ControlTypes ct
+            WHERE ct.CODE = ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM dbo.Controls existing
+                  WHERE existing.ControlCode = ?
+              );
+
+            IF NOT EXISTS (SELECT 1 FROM @InsertedControls)
+            BEGIN
+                THROW 51000, 'Control code already exists or control type was not found.', 1;
+            END;
+
+            INSERT INTO dbo.DomainControls (
+                DomainId,
+                ControlId,
+                RelationshipType,
+                IsPrimary,
+                DisplayOrder
+            )
+            SELECT
+                d.DomainId,
+                c.ControlId,
+                'Primary',
+                1,
+                COALESCE((
+                    SELECT MAX(existing.DisplayOrder) + 10
+                    FROM dbo.DomainControls existing
+                    WHERE existing.DomainId = d.DomainId
+                ), 10)
+            FROM dbo.Domains d
+            CROSS JOIN @InsertedControls c
+            WHERE d.DomainCode = ?;
+
+            IF @@ROWCOUNT = 0
+            BEGIN
+                THROW 51001, 'Domain was not found for control link.', 1;
+            END;
+
+            SELECT
+                c.ControlId,
+                c.ControlTypeId,
+                c.ControlCode,
+                c.DisplayName,
+                c.Description,
+                c.ControlObjective,
+                c.EvidenceExpectation,
+                c.Status,
+                ct.CODE AS ControlTypeCode,
+                ct.NAME AS ControlTypeName,
+                d.DomainCode,
+                d.DisplayName AS DomainDisplayName
+            FROM @InsertedControls c
+            JOIN dbo.ControlTypes ct
+                ON ct.ID = c.ControlTypeId
+            JOIN dbo.DomainControls dc
+                ON dc.ControlId = c.ControlId
+            JOIN dbo.Domains d
+                ON d.DomainId = dc.DomainId;
+            """,
+            [
+                normalized_control_code,
+                display_name.strip(),
+                description,
+                control_objective,
+                evidence_expectation,
+                normalized_type_code,
+                normalized_control_code,
+                normalized_domain_code,
+            ],
+        )
+        row = cursor.fetchone()
+        connection.commit()
+
+    if row is None:
+        raise ValueError("Control was not created.")
+
+    return _normalize_row(_row_to_dict(cursor, row))
+
+
 def get_domain_assist_context(settings: Settings, domain_code: str) -> dict[str, object]:
     normalized_code = _slug_code(domain_code)
     domains = list_domains(settings)

@@ -292,10 +292,13 @@
                     BorderThickness="1"
                     CornerRadius="8"
                     Padding="14">
-                <TabControl Background="Transparent"
+                <TabControl x:Name="DomainStoreCenterTabControl"
+                            Background="Transparent"
                             BorderBrush="#D6D0C4"
-                            BorderThickness="0">
-                    <TabItem Header="Domain Summary"
+                            BorderThickness="0"
+                            SelectionChanged="DomainStoreCenterTabControl_OnSelectionChanged">
+                    <TabItem x:Name="DomainSummaryTabItem"
+                             Header="Domain Summary"
                              Style="{StaticResource DomainStoreTabItemStyle}">
                         <Border Margin="0,0,0,0"
                                 Background="#FFFFFF"
@@ -613,7 +616,8 @@
                         </Border>
                     </TabItem>
 
-                    <TabItem Header="Collections"
+                    <TabItem x:Name="CollectionsTabItem"
+                             Header="Collections"
                              Style="{StaticResource DomainStoreTabItemStyle}">
                         <Grid Margin="0,0,0,0">
                             <Grid.RowDefinitions>
@@ -686,6 +690,11 @@
                                 </ListBox>
                             </Border>
                         </Grid>
+                    </TabItem>
+                    <TabItem x:Name="ControlsTabItem"
+                             Header="Controls"
+                             Style="{StaticResource DomainStoreTabItemStyle}">
+                        <local:DomainControlsTab x:Name="ControlsTabContent" />
                     </TabItem>
                 </TabControl>
             </Border>

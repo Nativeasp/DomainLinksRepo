@@ -50,6 +50,7 @@ public partial class DomainStoreWindow : Window
         {
             BaseAddress = new Uri(settings.BackendBaseUrl)
         };
+        ControlsTabContent.Configure(settings);
 
         SharedDomainTreeView.ItemsSource = _sharedRootDomains;
         ClientDomainTreeView.ItemsSource = _clientRootDomains;
@@ -275,6 +276,7 @@ public partial class DomainStoreWindow : Window
             .OrderBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
         CollectionsListBox.SelectedItem = null;
+        ControlsTabContent.SetSelectedDomain(domain);
 
         _ = LoadDocumentsAsync(domain);
     }
@@ -352,6 +354,7 @@ public partial class DomainStoreWindow : Window
         CollectionsListBox.ItemsSource = null;
         DocumentsDataGrid.ItemsSource = null;
         DocumentScopeTextBlock.Text = "No collection selected";
+        ControlsTabContent.SetSelectedDomain(null);
     }
 
     private void UpdateAssistActionAvailability()
@@ -1414,7 +1417,13 @@ public partial class DomainStoreWindow : Window
             return;
         }
 
-        var labelText = (domain.SourceDomain ?? domain).DisplayName?.Trim();
+        var targetDomain = domain.SourceDomain ?? domain;
+        if (!targetDomain.IsGroup)
+        {
+            SelectDomain(targetDomain);
+        }
+
+        var labelText = targetDomain.DisplayName?.Trim();
         if (string.IsNullOrWhiteSpace(labelText))
         {
             return;
@@ -1860,6 +1869,22 @@ public partial class DomainStoreWindow : Window
     private async void RefreshButton_OnClick(object sender, RoutedEventArgs e)
     {
         await ReloadAsync(_selectedDomain?.DomainCode, (CollectionsListBox.SelectedItem as CollectionItem)?.CollectionCode);
+    }
+
+    private async void DomainStoreCenterTabControl_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Source, DomainStoreCenterTabControl))
+        {
+            return;
+        }
+
+        if (DomainStoreCenterTabControl.SelectedItem == ControlsTabItem)
+        {
+            await ControlsTabContent.ActivateAsync(_selectedDomain);
+            return;
+        }
+
+        ControlsTabContent.Deactivate();
     }
 
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
