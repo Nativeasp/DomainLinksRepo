@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DomainLinks Backend - Python FastAPI services for AI-powered domain management">
+    <title>DomainLinks Backend – Python Services</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #27ae60;
+            --accent-color: #e74c3c;
+            --bg-color: #f8f9fa;
+            --text-color: #333;
+            --success-color: #27ae60;
+             --warning-color: #f39c12;
+         }
+
+          * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+          }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+          }
+
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--secondary-color);
+            padding-bottom: 0.5rem;
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+          }
+
+        h2 {
+            color: var(--secondary-color);
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+          }
+
+        h3 {
+            color: var(--primary-color);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            font-size: 1.3rem;
+          }
+
+        p {
+            margin-bottom: 1rem;
+          }
+
+          .section {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          }
+
+        a {
+            color: var(--secondary-color);
+            text-decoration: none;
+            transition: all 0.3s ease;
+          }
+
+        a:hover {
+            text-decoration: underline;
+            color: var(--accent-color);
+          }
+
+          .api-list {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+            border-left: 4px solid var(--secondary-color);
+          }
+
+          .api-endpoint {
+            font-family: 'Consolas', 'Courier New', monospace;
+            background: white;
+            padding: 0.75rem 1rem;
+            margin: 0.5rem 0;
+            border-left: 4px solid var(--secondary-color);
+            border-radius: 4px;
+            transition: all 0.3s ease;
+          }
+
+          .api-endpoint:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            transform: translateX(5px);
+          }
+
+          .architecture-diagram {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            overflow-x: auto;
+            margin: 1.5rem 0;
+            border: 1px solid #e0e0e0;
+          }
+
+          .tech-badge {
+            display: inline-block;
+            background: var(--secondary-color);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin: 0.25rem;
+            font-weight: 500;
+          }
+
+          .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+          }
+
+          .status-active {
+            background: var(--success-color);
+            color: white;
+          }
+
+          .status-beta {
+            background: var(--warning-color);
+            color: white;
+          }
+
+        ul {
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
+          }
+
+        li {
+            margin-bottom: 0.5rem;
+         }
+
+          .highlight-box {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+          }
+
+          .highlight-box h3 {
+            color: white;
+            margin-top: 0;
+          }
+
+        code {
+            background: #f4f4f4;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Courier New', monospace;
+         }
+
+          .api-method {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-right: 0.5rem;
+          }
+
+          .method-post {
+            background: #27ae60;
+            color: white;
+          }
+
+          .method-get {
+            background: #3498db;
+            color: white;
+          }
+
+          .method-delete {
+            background: #e74c3c;
+            color: white;
+          }
+
+          .method-put {
+            background: #f39c12;
+            color: white;
+          }
+     </style>
+</head>
+<body>
+     <h1>⚙️ DomainLinks Backend – Python Services</h1>
+      <p>The back-end of the DomainLinks application is implemented in Python, providing robust data processing, AI integration, and API services.</p>
+
+      <div class="highlight-box">
+          <h3>✨ Backend Highlights</h3>
+          <ul style="margin: 0; list-style-type: disc;">
+              <li><strong>FastAPI Framework</strong> - Modern, high-performance RESTful API server</li>
+              <li><strong>Async Operations</strong> - Non-blocking I/O for scalable performance</li>
+              <li><strong>AI Integration</strong> - Ollama LLMs and ChromaDB vector storage</li>
+              <li><strong>Enterprise Database</strong> - SQL Server with SQLAlchemy ORM</li>
+          </ul>
+      </div>
+
+      <div class="section">
+          <h2>🔑 Key Features</h2>
+          <ul>
+              <li><span class="tech-badge">FastAPI v0.115+</span> RESTful APIs for communication with the front-end</li>
+              <li><span class="tech-badge">Ollama</span> AI/ML integration with local LLM models</li>
+              <li><span class="tech-badge">ChromaDB</span> Vector storage for RAG pipelines</li>
+              <li><span class="tech-badge">SQLAlchemy</span> SQL Server database access (v2.0+)</li>
+              <li><span class="tech-badge">AsyncIO</span> Background task processing with async operations</li>
+              <li><span class="tech-badge">PyPDF2 / OCR</span> PDF and Image processing via Windows OCR</li>
+              <li><span class="tech-badge">HTTPX</span> HTTP client for external API calls (v0.27.0+)</li>
+              <li><span class="tech-badge">Pytest</span> Automated testing with coverage reporting (v8.3.0+)</li>
+          </ul>
+      </div>
+
+      <div class="section">
+          <h2>🌐 API Endpoints</h2>
+          <div class="api-list">
+              <div class="api-endpoint"><span class="api-method method-post">POST</span> <code>/domains</code> – Create new domain entities</div>
+              <div class="api-endpoint"><span class="api-method method-post">POST</span> <code>/collections</code> – Create new collections within domains</div>
+              <div class="api-endpoint"><span class="api-method method-post">POST</span> <code>/documents</code> – Upload and process text documents</div>
+              <div class="api-endpoint"><span class="api-method method-post">POST</span> <code>/ask</code> – Submit queries to the AI model with context retrieval</div>
+              <div class="api-endpoint"><span class="api-method method-post">POST</span> <code>/ask/stream</code> – Real-time streaming response for chat UI</div>
+              <div class="api-endpoint"><span class="api-method method-post">POST</span> <code>/ask/context-preview</code> – Estimate token budget before querying</div>
+              <div class="api-endpoint"><span class="api-method method-get">GET</span> <code>/collections</code> – List all collections</div>
+              <div class="api-endpoint"><span class="api-method method-get">GET</span> <code>/domains</code> – List all domains</div>
+              <div class="api-endpoint"><span class="api-method method-post">POST</span> <code>/chat-backup</code> – Manage chat backup files</div>
+          </div>
+      </div>
+
+      <div class="section">
+          <h2>🏗️ Backend Service Architecture</h2>
+          <div class="architecture-diagram">
+<pre style="font-family: 'Consolas', 'Courier New', monospace; font-size: 0.85rem;">
+┌──────────────┐
+│ FastAPI       │
+│ Server        │
+├──────────────┤
+│ /domains      │──────┐
+│ /collections │──────┤
+│ /ask          │──────┤
+│ /chat-backup │──────┘
+└──────────────┘
+         │
+         ├──► [(SQL Server)]
+         │
+         ├──► [Ollama API]
+         │
+         └──► [ChromaDB RAG]
+</pre>
+          </div>
+      </div>
+
+      <div class="section">
+          <h2>📊 Database Schema</h2>
+          <p>The backend uses SQL Server with <strong>28 tables</strong> organized into logical groups:</p>
+          
+          <h3>Core Domain Tables</h3>
+          <div class="api-list">
+              <ul>
+                  <li><code>Domains</code> (11 columns) - Main domain entities with metadata</li>
+                  <li><code>Collections</code> (8 columns) - Collections within domains</li>
+                  <li><code>Documents</code> (10 columns) - Uploaded documents and their content</li>
+                  <li><code>DomainTypes</code> (14 columns) - Domain type definitions</li>
+                  <li><code>DomainControls</code> (8 columns) - Domain control configurations</li>
+                  <li><code>DomainOrientations</code> (9 columns) - Domain orientation settings</li>
+              </ul>
+          </div>
+
+          <h3>Policy & Governance Tables</h3>
+          <div class="api-list">
+              <ul>
+                  <li><code>Policies</code> (16 columns) - Policy definitions and metadata</li>
+                  <li><code>PolicyPrinciples</code> (7 columns) - Policy principle statements</li>
+                  <li><code>PolicyObjectives</code> (7 columns) - Policy objectives</li>
+                  <li><code>PolicyControlStatements</code> (9 columns) - Control statement definitions</li>
+                  <li><code>PolicyConsequences</code> (7 columns) - Consequence definitions</li>
+                  <li><code>PolicyAccountabilityStatements</code> (7 columns) - Accountability tracking</li>
+                  <li><code>PolicyStrategyStatements</code> (7 columns) - Strategy statements</li>
+                  <li><code>PolicyTransparencyStatements</code> (7 columns) - Transparency requirements</li>
+                  <li><code>PolicyTemplates</code> (9 columns) - Policy template definitions</li>
+                  <li><code>PolicySections</code> (8 columns) - Section organization</li>
+                  <li><code>PolicyPrincipleLinks</code> (7 columns) - Principle relationships</li>
+                  <li><code>Principles</code> (15 columns) - Core principle definitions</li>
+                  <li><code>PrincipleRelations</code> (7 columns) - Principle relationship mappings</li>
+              </ul>
+          </div>
+
+          <h3>Content & Retrieval Tables</h3>
+          <div class="api-list">
+              <ul>
+                  <li><code>ContentUnits</code> (11 columns) - Content unit entities</li>
+                  <li><code>ContentUnitEmbeddings768</code> (6 columns) - Vector embeddings for content</li>
+                  <li><code>RetrievalProfiles</code> (12 columns) - Retrieval configuration profiles</li>
+                  <li><code>EmbeddingProfiles</code> (10 columns) - Embedding model configurations</li>
+              </ul>
+          </div>
+
+          <h3>Reference & Configuration Tables</h3>
+          <div class="api-list">
+              <ul>
+                  <li><code>Controls</code> (11 columns) - Control type definitions</li>
+                  <li><code>ControlTypes</code> (11 columns) - Control categorization</li>
+                  <li><code>ProviderSettings</code> (6 columns) - External provider configurations</li>
+                  <li><code>SchemaMigrations</code> (2 columns) - Database migration tracking</li>
+              </ul>
+          </div>
+      </div>
+
+      <div class="section">
+            <h2>📦 Deployment</h2>
+            <p>The back-end can be deployed as a standalone Python service or hosted on cloud platforms (AWS, Azure, GCP). It supports both local development and production environments with environment-based configuration.</p>
+
+            <h3>Key Source Files</h3>
+            <ul>
+                <li><code>main.py</code> – Application entry point and API server setup</li>
+                <li><code>app/</code> – Core application modules including domain logic and services</li>
+                <li><code>migrations/</code> – Database schema migrations using Alembic</li>
+                <li><code>tests/</code> – Unit and integration tests for backend components</li>
+            </ul>
+
+            <h3>Configuration</h3>
+            <p>The project is managed with a <code>pyproject.toml</code> configuration file, which defines dependencies and build settings. It can be run directly via Python.</p>
+        </div>
+      <div class="section">
+          <h2>🔧 Development Workflow</h2>
+          <ol style="margin-left: 1.5rem;">
+              <li>Install dependencies: <code>pip install -r requirements.txt</code></li>
+              <li>Configure environment variables in <code>.env</code></li>
+              <li>Run database migrations: <code>alembic upgrade head</code></li>
+              <li>Start the server: <code>uvicorn main:app --reload</code></li>
+              <li>Access API docs at <code>/docs</code></li>
+          </ol>
+      </div>
+
+      <div class="section">
+          <h2>🔗 Related Documentation</h2>
+          <ul>
+              <li><a href="index.htm">Application Overview</a></li>
+              <li><a href="frontend.htm">Front-End – C# WPF</a></li>
+              <li><a href="../DomainLinksBackend/README.md">Backend Project README</a></li>
+              <li><a href="../planning/domainlinks-prd.md">Product Requirements</a></li>
+          </ul>
+      </div>
+</body>
+</html>

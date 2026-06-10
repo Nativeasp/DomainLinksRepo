@@ -28,6 +28,7 @@ public partial class DomainControlsTab : UserControl
 
         CountComboBox.ItemsSource = new[] { 1, 3, 5, 8, 10 };
         ControlTypeComboBox.ItemsSource = _controlTypeOptions;
+        Loaded += DomainControlsTab_OnLoaded;
     }
 
     internal void Configure(DomainLinksDesktopSettings settings)
@@ -37,6 +38,42 @@ public partial class DomainControlsTab : UserControl
         {
             BaseAddress = new Uri(settings.BackendBaseUrl)
         };
+
+        if (IsLoaded)
+        {
+            ApplyLayoutSettings();
+        }
+    }
+
+    internal double BranchPaneHeight => BranchControlsRow.ActualHeight > BranchControlsRow.MinHeight
+        ? BranchControlsRow.ActualHeight
+        : _settings?.DomainControlsBranchPaneHeight ?? 240;
+
+    internal double SuggestionsPaneWidth => SuggestionsColumn.ActualWidth > SuggestionsColumn.MinWidth
+        ? SuggestionsColumn.ActualWidth
+        : _settings?.DomainControlsSuggestionPaneWidth ?? 460;
+
+    private void DomainControlsTab_OnLoaded(object sender, RoutedEventArgs e)
+    {
+        ApplyLayoutSettings();
+    }
+
+    private void ApplyLayoutSettings()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        if (_settings.DomainControlsBranchPaneHeight > 0)
+        {
+            BranchControlsRow.Height = new GridLength(_settings.DomainControlsBranchPaneHeight);
+        }
+
+        if (_settings.DomainControlsSuggestionPaneWidth > 0)
+        {
+            SuggestionsColumn.Width = new GridLength(_settings.DomainControlsSuggestionPaneWidth);
+        }
     }
 
     public void SetSelectedDomain(DomainItem? domain)

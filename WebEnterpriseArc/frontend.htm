@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DomainLinks Frontend - C# WPF desktop application with AI-powered UI">
+    <title>DomainLinks Frontend – C# WPF Application</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+             --secondary-color: #9b59b6;
+             --accent-color: #e74c3c;
+             --bg-color: #f8f9fa;
+             --text-color: #333;
+             --success-color: #27ae60;
+              --warning-color: #f39c12;
+          }
+
+           * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+           }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+           }
+
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--secondary-color);
+            padding-bottom: 0.5rem;
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+           }
+
+        h2 {
+            color: var(--secondary-color);
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+           }
+
+        h3 {
+            color: var(--primary-color);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            font-size: 1.3rem;
+           }
+
+        p {
+            margin-bottom: 1rem;
+           }
+
+           .section {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+           }
+
+        a {
+            color: var(--secondary-color);
+            text-decoration: none;
+            transition: all 0.3s ease;
+           }
+
+        a:hover {
+            text-decoration: underline;
+            color: var(--accent-color);
+           }
+
+           .architecture-diagram {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            overflow-x: auto;
+            margin: 1.5rem 0;
+            border: 1px solid #e0e0e0;
+           }
+
+           .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+           }
+
+           .feature-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border-left: 4px solid var(--secondary-color);
+           }
+
+           .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+           }
+
+           .tech-badge {
+            display: inline-block;
+            background: var(--secondary-color);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin: 0.25rem;
+            font-weight: 500;
+           }
+
+           .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+           }
+
+           .status-active {
+            background: var(--success-color);
+            color: white;
+           }
+
+           .status-beta {
+            background: var(--warning-color);
+            color: white;
+           }
+
+        ul {
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
+           }
+
+        li {
+            margin-bottom: 0.5rem;
+          }
+
+           .code-block {
+            background: #f8f9fa;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            margin: 0.5rem 0;
+            border-left: 3px solid var(--secondary-color);
+           }
+
+           .highlight-box {
+            background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+           }
+
+           .highlight-box h3 {
+            color: white;
+            margin-top: 0;
+           }
+
+        code {
+            background: #f4f4f4;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Courier New', monospace;
+          }
+      </style>
+</head>
+<body>
+      <h1>🖥️ DomainLinks Frontend – C# WPF Application</h1>
+       <p>The frontend of the DomainLinks application is built using Windows Presentation Foundation (WPF) with C#. It provides a native Windows desktop experience with rich UI capabilities and seamless AI integration.</p>
+
+       <div class="highlight-box">
+           <h3>✨ Frontend Highlights</h3>
+           <ul style="margin: 0; list-style-type: disc;">
+               <li><strong>MVVM Architecture</strong> - Clean separation of UI and business logic</li>
+               <li><strong>XAML-Based UI</strong> - Declarative layout with modern styling</li>
+               <li><strong>WebView2 Integration</strong> - Edge Chromium rendering for rich content</li>
+               <li><strong>AI-Powered Features</strong> - Ollama model integration with streaming responses</li>
+           </ul>
+       </div>
+
+       <div class="section">
+           <h2>🔑 Key Features</h2>
+           <ul>
+               <li><span class="tech-badge">MVVM Pattern</span> - Strong data binding and clean separation of UI and logic</li>
+               <li><span class="tech-badge">XAML-Based UI</span> - Declarative layout and styling</li>
+               <li><span class="tech-badge">.NET Libraries</span> - Integration with networking, file I/O, and threading</li>
+               <li><span class="tech-badge">Responsive Design</span> - Using Grid, StackPanel, and adaptive resources</li>
+               <li><span class="tech-badge">Custom Controls</span> - MaterialDesignInXAML, MahApps.Metro support</li>
+               <li><span class="tech-badge">Event-Driven</span> - Commands and routed events</li>
+               <li><span class="tech-badge">Data Visualization</span> - Charting controls and custom renderers</li>
+               <li><span class="tech-badge">Animations</span> - Transitions for enhanced user experience</li>
+               <li><span class="tech-badge status-active">AI Chat Interface</span> - Integrated Ollama model support with streaming responses</li>
+               <li><span class="tech-badge">Document Management</span> - PDF/Image upload with OCR processing UI</li>
+               <li><span class="tech-badge">WebView2 Integration</span> - Edge Chromium rendering for rich AI output</li>
+               <li><span class="tech-badge">Advanced Export</span> - Direct export to .docx and .html formats</li>
+           </ul>
+       </div>
+
+       <div class="section">
+           <h2>📦 Desktop Installer</h2>
+           <p>The application is packaged as a Windows desktop installer using ClickOnce or MSIX, allowing easy installation and updates via Visual Studio publish profiles.</p>
+       </div>
+
+       <div class="section">
+           <h2>🏗️ UI Component Architecture</h2>
+           <div class="architecture-diagram">
+<pre style="font-family: 'Consolas', 'Courier New', monospace; font-size: 0.85rem;">
+┌──────────────────────┐
+│ MainWindow.xaml.cs     │
+│ Main Window             │
+├──────────────────────┤
+│ ChatHistoryManager     │──────► [(SQL Server)]
+│ DomainViewModel        │──────►
+│ OllamaClient           │──────► [Ollama API]
+│ DocumentService        │──────► [OCR Engine]
+└──────────────────────┘
+</pre>
+           </div>
+       </div>
+
+       <div class="section">
+           <h2>📂 Key Source Files</h2>
+           <ul>
+               <li><code class="code-block">MainWindow.xaml.cs</code> – Main window and UI logic</li>
+               <li><code class="code-block">DomainLinksDesktop/*.cs</code> – View models and services</li>
+               <li><code class="code-block">App.config</code> – Application configuration and settings</li>
+               <li><code class="code-block">DomainStoreWindow.xaml.cs</code> – Domain store management</li>
+               <li><code class="code-block">ChatBackupService.cs</code> – Chat history persistence</li>
+               <li><code class="code-block">OcrViewerWindow.xaml.cs</code> – OCR viewer integration</li>
+           </ul>
+       </div>
+
+       <div class="section">
+           <h2>🎨 UI Frameworks & Libraries</h2>
+           <div class="feature-grid">
+               <div class="feature-card">
+                   <h3>UI Controls</h3>
+                   <ul>
+                       <li><span class="tech-badge">MaterialDesignInXAML</span></li>
+                       <li><span class="tech-badge">MahApps.Metro</span></li>
+                       <li><span class="tech-badge">CommunityToolkit.MVVM</span></li>
+                       <li><span class="tech-badge">Prism Framework</span></li>
+                   </ul>
+               </div>
+               <div class="feature-card">
+                   <h3>Data Access & Export</h3>
+                   <ul>
+                       <li><span class="tech-badge">Entity Framework</span> / ADO.NET</li>
+                       <li><span class="tech-badge">SQLClient</span></li>
+                       <li><span class="tech-badge">OpenXML SDK</span> (Docx Generation)</li>
+                       <li><span class="tech-badge">WebView2</span> HTML Rendering</li>
+                   </ul>
+               </div>
+               <div class="feature-card">
+                   <h3>AI Integration</h3>
+                   <ul>
+                       <li><span class="tech-badge status-active">Ollama API Client</span></li>
+                       <li><span class="tech-badge">HTTP Client</span> / JSON Serialization</li>
+                       <li><span class="tech-badge">Dynamic Model Selection</span> via Ollama Tags</li>
+                       <li><span class="tech-badge">Streaming Response</span> Handling</li>
+                   </ul>
+               </div>
+           </div>
+       </div>
+
+       <div class="section">
+           <h2>🚀 Development Workflow</h2>
+           <ol style="margin-left: 1.5rem;">
+               <li>Open solution in Visual Studio 2022</li>
+               <li>Configure connection strings in <code>App.config</code></li>
+               <li>Build solution (Ctrl+Shift+B)</li>
+               <li>Run application (F5)</li>
+               <li>Test UI components and API integration</li>
+           </ol>
+       </div>
+
+       <div class="section">
+           <h2>📚 Related Documentation</h2>
+           <ul>
+               <li><a href="index.htm">Application Overview</a></li>
+               <li><a href="backend.htm">Backend – Python Services</a></li>
+               <li><a href="../DomainLinksAI/README.md">DomainLinksAI Project README</a></li>
+               <li><a href="../planning/current-domainlinks-domain-structure.md">Domain Structure</a></li>
+           </ul>
+       </div>
+
+       <div class="section">
+           <h2>🔧 Configuration</h2>
+           <p>The project is compiled with .NET Framework (or .NET 6/7 depending on the solution configuration) and can be built directly from Visual Studio.</p>
+           
+           <h3>App.config Settings</h3>
+           <ul>
+               <li>Database connection strings</li>
+               <li>Ollama API endpoint configuration</li>
+               <li>Application settings and preferences</li>
+               <li>Logging configuration</li>
+           </ul>
+       </div>
+</body>
+</html>

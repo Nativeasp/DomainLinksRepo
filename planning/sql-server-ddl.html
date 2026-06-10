@@ -45,17 +45,46 @@
   </p>
 
   <div class="note">
-    Domains and projects are both retrieval scopes. Durable knowledge uses
-    <code>DomainType = 'Knowledge'</code>; short-term project memory uses
-    <code>DomainType = 'ProjectMemory'</code>.
+    Domains are recursive retrieval scopes. They can form a hierarchy through
+    <code>DomainParentId</code>, and their level is defined by
+    <code>DomainTypeId</code> pointing to <code>DomainTypes</code>
+    (<code>STRATEGIC</code>, <code>TACTICAL</code>, <code>OPERATIONAL</code>).
   </div>
+
+  <h2>DomainTypes</h2>
+  <pre><code>CREATE TABLE dbo.DomainTypes
+(
+    ID                    int IDENTITY(1,1) NOT NULL,
+    CODE                  nvarchar(50) NOT NULL,
+    NAME                  nvarchar(100) NOT NULL,
+    DOMAIN_LEVEL          int NOT NULL,
+    PRIMARY_FOCUS         nvarchar(500) NOT NULL,
+    KEY_QUESTION          nvarchar(200) NOT NULL,
+    DESCRIPTION           nvarchar(500) NULL,
+    DISPLAY_ORDER         int NOT NULL,
+    EFFECTIVE_START_DATE  date NULL,
+    EFFECTIVE_END_DATE    date NULL,
+    CREATED_DATE          datetime2 NOT NULL
+        CONSTRAINT DF_DomainTypes_CREATED_DATE DEFAULT (SYSDATETIME()),
+    CREATED_BY            nvarchar(128) NOT NULL
+        CONSTRAINT DF_DomainTypes_CREATED_BY DEFAULT (SUSER_SNAME()),
+    UPDATED_DATE          datetime2 NULL,
+    UPDATED_BY            nvarchar(128) NULL,
+    CONSTRAINT PK_DomainTypes PRIMARY KEY CLUSTERED (ID),
+    CONSTRAINT UQ_DomainTypes_CODE UNIQUE (CODE),
+    CONSTRAINT UQ_DomainTypes_DOMAIN_LEVEL UNIQUE (DOMAIN_LEVEL),
+    CONSTRAINT CK_DomainTypes_DOMAIN_LEVEL CHECK (DOMAIN_LEVEL BETWEEN 1 AND 3)
+);</code></pre>
 
   <h2>Domains</h2>
   <pre><code>CREATE TABLE dbo.Domains (
     DomainId           UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_Domains_DomainId DEFAULT (NEWID()),
+        CONSTRAINT DF_Domains_DomainId DEFAULT (NEWSEQUENTIALID()),
+    DomainParentId     UNIQUEIDENTIFIER NULL,
+    DomainTypeId       INT NULL,
+    DisplayOrder       INT NOT NULL
+        CONSTRAINT DF_Domains_DisplayOrder DEFAULT (0),
     DomainCode         NVARCHAR(100) NOT NULL,
-    DomainType         NVARCHAR(40) NOT NULL,
     DisplayName        NVARCHAR(255) NOT NULL,
     Description        NVARCHAR(MAX) NULL,
     Status             NVARCHAR(30) NOT NULL
@@ -66,48 +95,27 @@
         CONSTRAINT DF_Domains_UpdatedAtUtc DEFAULT (SYSUTCDATETIME()),
     CONSTRAINT PK_Domains PRIMARY KEY (DomainId),
     CONSTRAINT UQ_Domains_DomainCode UNIQUE (DomainCode),
-    CONSTRAINT CK_Domains_DomainType
-        CHECK (DomainType IN ('Knowledge', 'ProjectMemory', 'System'))
+    CONSTRAINT FK_Domains_ParentDomain
+        FOREIGN KEY (DomainParentId) REFERENCES dbo.Domains(DomainId),
+    CONSTRAINT FK_Domains_DomainTypes
+        FOREIGN KEY (DomainTypeId) REFERENCES dbo.DomainTypes(ID),
+    CONSTRAINT CK_Domains_ParentDomain_NotSelf
+        CHECK (DomainParentId IS NULL OR DomainParentId <> DomainId)
 );
 
-CREATE INDEX IX_Domains_DomainType_Status
-    ON dbo.Domains(DomainType, Status);</code></pre>
+CREATE INDEX IX_Domains_DomainParentId
+    ON dbo.Domains(DomainParentId);
 
-  <h2>DomainClusters</h2>
-  <pre><code>CREATE TABLE dbo.DomainClusters (
-    DomainClusterId    UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_DomainClusters_DomainClusterId DEFAULT (NEWID()),
-    ClusterCode        NVARCHAR(100) NOT NULL,
-    DisplayName        NVARCHAR(255) NOT NULL,
-    Description        NVARCHAR(MAX) NULL,
-    Status             NVARCHAR(30) NOT NULL
-        CONSTRAINT DF_DomainClusters_Status DEFAULT ('Active'),
-    CreatedAtUtc       DATETIME2(3) NOT NULL
-        CONSTRAINT DF_DomainClusters_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
-    UpdatedAtUtc       DATETIME2(3) NOT NULL
-        CONSTRAINT DF_DomainClusters_UpdatedAtUtc DEFAULT (SYSUTCDATETIME()),
-    CONSTRAINT PK_DomainClusters PRIMARY KEY (DomainClusterId),
-    CONSTRAINT UQ_DomainClusters_ClusterCode UNIQUE (ClusterCode)
-);</code></pre>
+CREATE INDEX IX_Domains_DomainTypeId
+    ON dbo.Domains(DomainTypeId);
 
-  <h2>DomainClusterMembers</h2>
-  <pre><code>CREATE TABLE dbo.DomainClusterMembers (
-    DomainClusterId    UNIQUEIDENTIFIER NOT NULL,
-    DomainId           UNIQUEIDENTIFIER NOT NULL,
-    CreatedAtUtc       DATETIME2(3) NOT NULL
-        CONSTRAINT DF_DomainClusterMembers_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
-    CONSTRAINT PK_DomainClusterMembers
-        PRIMARY KEY (DomainClusterId, DomainId),
-    CONSTRAINT FK_DomainClusterMembers_DomainClusters
-        FOREIGN KEY (DomainClusterId) REFERENCES dbo.DomainClusters(DomainClusterId),
-    CONSTRAINT FK_DomainClusterMembers_Domains
-        FOREIGN KEY (DomainId) REFERENCES dbo.Domains(DomainId)
-);</code></pre>
+CREATE INDEX IX_Domains_Parent_DisplayOrder
+    ON dbo.Domains(DomainParentId, DisplayOrder, DisplayName);</code></pre>
 
   <h2>Collections</h2>
   <pre><code>CREATE TABLE dbo.Collections (
     CollectionId       UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_Collections_CollectionId DEFAULT (NEWID()),
+        CONSTRAINT DF_Collections_CollectionId DEFAULT (NEWSEQUENTIALID()),
     DomainId           UNIQUEIDENTIFIER NOT NULL,
     CollectionCode     NVARCHAR(100) NOT NULL,
     DisplayName        NVARCHAR(255) NOT NULL,
@@ -130,7 +138,7 @@ CREATE INDEX IX_Collections_Domain_Status
   <h2>Documents</h2>
   <pre><code>CREATE TABLE dbo.Documents (
     DocumentId         UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_Documents_DocumentId DEFAULT (NEWID()),
+        CONSTRAINT DF_Documents_DocumentId DEFAULT (NEWSEQUENTIALID()),
     CollectionId       UNIQUEIDENTIFIER NOT NULL,
     SourceName         NVARCHAR(500) NOT NULL,
     SourcePath         NVARCHAR(1000) NULL,
@@ -157,7 +165,7 @@ CREATE INDEX IX_Documents_ExternalDocumentId
   <h2>ContentUnits</h2>
   <pre><code>CREATE TABLE dbo.ContentUnits (
     ContentUnitId      UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_ContentUnits_ContentUnitId DEFAULT (NEWID()),
+        CONSTRAINT DF_ContentUnits_ContentUnitId DEFAULT (NEWSEQUENTIALID()),
     DocumentId         UNIQUEIDENTIFIER NOT NULL,
     UnitType           NVARCHAR(40) NOT NULL,
     UnitOrdinal        INT NOT NULL,
@@ -189,7 +197,7 @@ CREATE INDEX IX_ContentUnits_UnitType_Status
   <h2>EmbeddingProfiles</h2>
   <pre><code>CREATE TABLE dbo.EmbeddingProfiles (
     EmbeddingProfileId UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_EmbeddingProfiles_EmbeddingProfileId DEFAULT (NEWID()),
+        CONSTRAINT DF_EmbeddingProfiles_EmbeddingProfileId DEFAULT (NEWSEQUENTIALID()),
     ProfileCode        NVARCHAR(100) NOT NULL,
     Provider           NVARCHAR(50) NOT NULL,
     ModelName          NVARCHAR(200) NOT NULL,
@@ -213,7 +221,7 @@ CREATE INDEX IX_ContentUnits_UnitType_Status
   <h2>ContentUnitEmbeddings768</h2>
   <pre><code>CREATE TABLE dbo.ContentUnitEmbeddings768 (
     ContentUnitEmbeddingId UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_ContentUnitEmbeddings768_Id DEFAULT (NEWID()),
+        CONSTRAINT DF_ContentUnitEmbeddings768_Id DEFAULT (NEWSEQUENTIALID()),
     ContentUnitId          UNIQUEIDENTIFIER NOT NULL,
     EmbeddingProfileId     UNIQUEIDENTIFIER NOT NULL,
     EmbeddingVector        VECTOR(768) NOT NULL,
@@ -235,7 +243,7 @@ CREATE INDEX IX_ContentUnitEmbeddings768_Profile
   <h2>RetrievalProfiles</h2>
   <pre><code>CREATE TABLE dbo.RetrievalProfiles (
     RetrievalProfileId UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_RetrievalProfiles_RetrievalProfileId DEFAULT (NEWID()),
+        CONSTRAINT DF_RetrievalProfiles_RetrievalProfileId DEFAULT (NEWSEQUENTIALID()),
     ProfileCode        NVARCHAR(100) NOT NULL,
     DisplayName        NVARCHAR(255) NOT NULL,
     RetrievalMode      NVARCHAR(40) NOT NULL,
@@ -263,7 +271,7 @@ CREATE INDEX IX_ContentUnitEmbeddings768_Profile
   <h2>ProviderSettings</h2>
   <pre><code>CREATE TABLE dbo.ProviderSettings (
     ProviderSettingId  UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_ProviderSettings_ProviderSettingId DEFAULT (NEWID()),
+        CONSTRAINT DF_ProviderSettings_ProviderSettingId DEFAULT (NEWSEQUENTIALID()),
     Provider           NVARCHAR(50) NOT NULL,
     SettingKey         NVARCHAR(200) NOT NULL,
     SettingValue       NVARCHAR(MAX) NOT NULL,
@@ -275,37 +283,29 @@ CREATE INDEX IX_ContentUnitEmbeddings768_Profile
     CONSTRAINT UQ_ProviderSettings_Provider_Key UNIQUE (Provider, SettingKey)
 );</code></pre>
 
-  <h2>LegacyChromaMigrationState</h2>
-  <pre><code>CREATE TABLE dbo.LegacyChromaMigrationState (
-    LegacyChromaMigrationStateId UNIQUEIDENTIFIER NOT NULL
-        CONSTRAINT DF_LegacyChromaMigrationState_Id DEFAULT (NEWID()),
-    LegacyStoreName      NVARCHAR(255) NULL,
-    LegacyCollectionName NVARCHAR(255) NULL,
-    TargetDomainId       UNIQUEIDENTIFIER NULL,
-    TargetCollectionId   UNIQUEIDENTIFIER NULL,
-    MigrationStatus      NVARCHAR(30) NOT NULL
-        CONSTRAINT DF_LegacyChromaMigrationState_Status DEFAULT ('Pending'),
-    SourcePath           NVARCHAR(1000) NULL,
-    LastMigratedAtUtc    DATETIME2(3) NULL,
-    LastError            NVARCHAR(MAX) NULL,
-    CreatedAtUtc         DATETIME2(3) NOT NULL
-        CONSTRAINT DF_LegacyChromaMigrationState_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
-    UpdatedAtUtc         DATETIME2(3) NOT NULL
-        CONSTRAINT DF_LegacyChromaMigrationState_UpdatedAtUtc DEFAULT (SYSUTCDATETIME()),
-    CONSTRAINT PK_LegacyChromaMigrationState PRIMARY KEY (LegacyChromaMigrationStateId),
-    CONSTRAINT FK_LegacyChromaMigrationState_Domains
-        FOREIGN KEY (TargetDomainId) REFERENCES dbo.Domains(DomainId),
-    CONSTRAINT FK_LegacyChromaMigrationState_Collections
-        FOREIGN KEY (TargetCollectionId) REFERENCES dbo.Collections(CollectionId),
-    CONSTRAINT CK_LegacyChromaMigrationState_Status
-        CHECK (MigrationStatus IN ('Pending', 'Migrated', 'Skipped', 'Failed', 'Validated'))
-);</code></pre>
 
   <h2>Seed Defaults</h2>
-  <pre><code>INSERT INTO dbo.Domains (DomainCode, DomainType, DisplayName, Description)
+  <pre><code>INSERT INTO dbo.Domains (DomainParentId, DomainTypeId, DomainCode, DisplayName, Description)
 VALUES
-    ('projects', 'ProjectMemory', 'Projects', 'Short-term working memory scopes.'),
-    ('system', 'System', 'System', 'System-owned metadata and defaults.');
+    (
+        NULL,
+        (SELECT ID FROM dbo.DomainTypes WHERE CODE = 'STRATEGIC'),
+        'projects',
+        'Projects',
+        'Top-level project workspace domain.'
+    );
+
+INSERT INTO dbo.Domains (DomainId, DomainParentId, DomainTypeId, DomainCode, DisplayName, Description)
+VALUES
+    ('BF003718-BCBD-4DCC-A08A-098474B5B2BB', NULL, (SELECT ID FROM dbo.DomainTypes WHERE CODE = 'STRATEGIC'), 'finance', 'Finance', 'Durable finance knowledge, controls, and guidance.'),
+    ('F024E45F-5A72-4839-9F0C-CF169847ABB7', NULL, (SELECT ID FROM dbo.DomainTypes WHERE CODE = 'STRATEGIC'), 'governance', 'Governance', 'Durable governance, board, and policy materials.'),
+    ('9ACD6263-B8E5-446B-B649-DE9967255118', NULL, (SELECT ID FROM dbo.DomainTypes WHERE CODE = 'STRATEGIC'), 'hr', 'HR', 'Durable human resources knowledge and policy.');
+
+INSERT INTO dbo.Collections (DomainId, CollectionCode, DisplayName, Description)
+VALUES
+    ('BF003718-BCBD-4DCC-A08A-098474B5B2BB', 'budget-controls', 'Budget Controls', 'Budget rules, approvals, and financial control guidance.'),
+    ('F024E45F-5A72-4839-9F0C-CF169847ABB7', 'board-governance', 'Board Governance', 'Board structure, governance policy, and committee guidance.'),
+    ('9ACD6263-B8E5-446B-B649-DE9967255118', 'hiring-policy', 'Hiring Policy', 'Core hiring policy, process, and role intake guidance.');
 
 INSERT INTO dbo.EmbeddingProfiles (
     ProfileCode,

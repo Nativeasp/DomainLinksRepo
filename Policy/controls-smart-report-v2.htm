@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Smart Controls Report</title>
+  <style>
+    :root {
+      --text: #111;
+      --muted: #5a5a5a;
+      --line: #d7d7d7;
+      --panel: #f7f7f7;
+      --panel-2: #fcfcfc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 24px;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      background: #fff;
+      line-height: 1.4;
+    }
+    h1, h2, h3, h4, p { margin: 0 0 10px; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; margin-top: 28px; }
+    h3 { font-size: 17px; margin-top: 20px; }
+    h4 { font-size: 14px; margin-top: 14px; }
+    .meta, .muted { color: var(--muted); }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 18px 0 28px;
+    }
+    .summary-card, .domain-card, .control-card {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+    }
+    .summary-card {
+      padding: 12px 14px;
+      min-height: 92px;
+    }
+    .summary-number {
+      display: block;
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .domain-card {
+      padding: 16px;
+      margin: 0 0 22px;
+      background: var(--panel);
+    }
+    .domain-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+    .pill {
+      display: inline-block;
+      border: 1px solid #bdbdbd;
+      padding: 2px 8px;
+      font-size: 12px;
+      background: #fff;
+      white-space: nowrap;
+    }
+    .breadcrumb {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: -4px;
+      margin-bottom: 8px;
+    }
+    .control-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .control-card {
+      padding: 14px;
+      background: #fff;
+    }
+    .control-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .control-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 8px 0 10px;
+    }
+    .label {
+      font-weight: bold;
+    }
+    .mono {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 24px;
+      table-layout: fixed;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+      word-break: break-word;
+    }
+    th {
+      background: #f1f1f1;
+      font-size: 13px;
+    }
+    .section-note {
+      margin-bottom: 10px;
+      color: var(--muted);
+    }
+    @media (max-width: 900px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .domain-header, .control-top { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Smart Controls Report</h1>
+  <p class="meta">Built from <span class="mono">dbo.Domains</span>, <span class="mono">dbo.DomainControls</span>, <span class="mono">dbo.Controls</span>, and <span class="mono">dbo.ControlTypes</span> in the <span class="mono">DomainLinks</span> database.</p>
+
+  <div class="summary">
+    <div class="summary-card">
+      <span class="summary-number">2</span>
+      <div>Domains with controls</div>
+    </div>
+    <div class="summary-card">
+      <span class="summary-number">10</span>
+      <div>Total controls linked to domains</div>
+    </div>
+    <div class="summary-card">
+      <span class="summary-number">9</span>
+      <div>Controls under Performance Management</div>
+    </div>
+    <div class="summary-card">
+      <span class="summary-number">1</span>
+      <div>Controls under Executive Administration</div>
+    </div>
+    <div class="summary-card">
+      <span class="summary-number">9</span>
+      <div>Directive controls</div>
+    </div>
+    <div class="summary-card">
+      <span class="summary-number">1</span>
+      <div>Preventive controls</div>
+    </div>
+  </div>
+
+  <h2>Domain Groups</h2>
+  <p class="section-note">Domains are listed first, with each domain’s linked controls ordered by <span class="mono">DomainControls.DisplayOrder</span>.</p>
+
+  <div class="domain-card">
+    <div class="domain-header">
+      <div>
+        <h3>Performance Management</h3>
+        <div class="breadcrumb">Executive Administration / Performance Management</div>
+        <p class="muted">Enterprise performance planning, monitoring, reporting, and improvement.</p>
+        <p><span class="label">Domain Code:</span> <span class="mono">performance-management</span></p>
+        <p><span class="label">Domain ID:</span> <span class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</span></p>
+      </div>
+      <div class="pill">9 linked controls</div>
+    </div>
+
+    <div class="control-list">
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>10. Mandatory Signed Role Approval</h4>
+            <div class="control-meta">
+              <span class="pill">Preventive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-mandatory-signed-role-approval</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Requires all employees to have a signed Role &amp; Responsibility (R&amp;R) document on file before performance metrics are set.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Ensure performance expectations are formally documented and agreed upon prior to evaluation periods.</div>
+          <div><span class="label">Evidence:</span> Signed R&amp;R documents with timestamped approval records in the HRIS repository.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>20. Annual Weighting Calibration Review</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-annual-weighting-calibration-review</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Requires an annual review of weighting logic to ensure alignment with current organizational strategy.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> To maintain relevance and accuracy of performance weights as business priorities shift.</div>
+          <div><span class="label">Evidence:</span> Annual calibration meeting agenda and attendance record showing leadership review of weight allocations.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>30. Development Plan Weighting Methodology Definition</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-development-plan-weighting-methodology-definition</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Establishes formal rules requiring specific development plan tiers to correspond with defined performance weighting ranges.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Ensures consistent application of weightings across roles based on strategic development goals rather than subjective adjustment.</div>
+          <div><span class="label">Evidence:</span> Approved policy document outlining the mapping logic between development plan levels and role weighting percentages.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>40. Role Weighting Deviation Justification Record</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-role-weighting-deviation-justification-record</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Mandates documented rationale when weighting allocation deviates from standard matrices due to development plan changes.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Prevents arbitrary weighting adjustments by requiring traceable links between development needs and performance expectations.</div>
+          <div><span class="label">Evidence:</span> Audit logs containing specific justifications linked to approved development plan modifications for the role.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>50. Manager Alignment Certification on Development Weightings</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-manager-alignment-certification-on-development-weightings</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Requires managers to certify annually that assigned role weightings align with approved individual development plans.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Promotes accountability and transparency in how career development strategies influence performance evaluation criteria.</div>
+          <div><span class="label">Evidence:</span> Signed certification records from management confirming adherence between weighting structures and development plan scopes.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>60. Mandatory Three-Year Employee Development Plan</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-mandatory-three-year-employee-development-plan</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Requires creation of a formal three-year development roadmap for all eligible employees.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Ensures long-term career planning is initiated and documented across the workforce.</div>
+          <div><span class="label">Evidence:</span> Signed 3-year development plan documents accessible in HR management system.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>70. Strategic Alignment Verification on Development Milestones</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-strategic-alignment-verification-on-development-milestones</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Requires development milestones to be explicitly mapped against organizational strategic objectives.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Aligns individual growth trajectories with corporate strategic direction.</div>
+          <div><span class="label">Evidence:</span> Documented linkage matrix or system fields mapping development goals to strategic pillars.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>80. Annual Development Plan Refresh Cycle</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-annual-development-plan-refresh-cycle</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Mandates annual review and updating of the three-year development plan to reflect current career status.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Maintains relevance of development goals within the strategic horizon over time.</div>
+          <div><span class="label">Evidence:</span> System logs or signed forms demonstrating annual update approvals for employee plans.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>90. Three-Year Complexity Escalation Standard</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-three-year-complexity-escalation-standard</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Mandates that development plans explicitly demonstrate a progression from basic to complex deliverables across Year 1, Year 2, and Year 3.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Prevent stagnation in development plans by enforcing a structured growth trajectory for employee responsibilities.</div>
+          <div><span class="label">Evidence:</span> Approved development plans showing distinct, increasing complexity levels in Year 1 versus Year 3 deliverables.</div>
+        </div>
+      </div>
+
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>100. Employee Development Plan Acknowledgement Rule</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">performance-management-employee-development-plan-acknowledgement-rule</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Requires employees to formally acknowledge they understand the three-year role progression expectations defined in their development plan.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> Ensure employees are aware of and committed to the specific responsibilities and complexity tiers outlined for them.</div>
+          <div><span class="label">Evidence:</span> Signed acknowledgment forms or digital confirmation logs from employees regarding their development plan structure.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="domain-card">
+    <div class="domain-header">
+      <div>
+        <h3>Executive Administration</h3>
+        <div class="breadcrumb">Executive Administration</div>
+        <p class="muted">Executive administration capabilities for strategic planning, organizational management, and performance management.</p>
+        <p><span class="label">Domain Code:</span> <span class="mono">executive-administration</span></p>
+        <p><span class="label">Domain ID:</span> <span class="mono">45F6E7A6-98F3-4019-9FE6-1B8A78EE455C</span></p>
+      </div>
+      <div class="pill">1 linked control</div>
+    </div>
+
+    <div class="control-list">
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>10. Executive Strategic Mandate Publication</h4>
+            <div class="control-meta">
+              <span class="pill">Directive Control</span>
+              <span class="pill">Primary</span>
+              <span class="pill">Active</span>
+            </div>
+            <p class="mono">executive-administration-executive-strategic-mandate-publication</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> Requires formal publication of approved strategic mandates to ensure organizational alignment.</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> To enforce consistent understanding of strategic priorities across the executive tier.</div>
+          <div><span class="label">Evidence:</span> Published strategic mandate documents dated and approved by Executive Sponsor, distributed via official intranet or email with read receipts.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Appendix</h2>
+  <p class="section-note">Raw table snapshots used to build the grouped view.</p>
+
+  <h3>Control Type Mix</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Control Type</th>
+        <th>Count</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Preventive Control</td>
+        <td>1</td>
+        <td>Prevents an undesirable event from occurring.</td>
+      </tr>
+      <tr>
+        <td>Directive Control</td>
+        <td>9</td>
+        <td>Establishes required behaviour, expectations, or rules.</td>
+      </tr>
+      <tr>
+        <td>Detective Control</td>
+        <td>0</td>
+        <td>Identifies an undesirable event that has occurred.</td>
+      </tr>
+      <tr>
+        <td>Corrective Control</td>
+        <td>0</td>
+        <td>Restores or corrects conditions after an issue is detected.</td>
+      </tr>
+      <tr>
+        <td>Compensating Control</td>
+        <td>0</td>
+        <td>Alternative control used when the preferred control cannot be implemented.</td>
+      </tr>
+      <tr>
+        <td>Deterrent Control</td>
+        <td>0</td>
+        <td>Discourages undesirable behaviour through awareness or visibility.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>DomainControls Raw</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>DomainControlId</th>
+        <th>DomainId</th>
+        <th>ControlId</th>
+        <th>RelationshipType</th>
+        <th>IsPrimary</th>
+        <th>DisplayOrder</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="mono">1D04BA81-BE5D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">1C04BA81-BE5D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>10</td></tr>
+      <tr><td class="mono">F23F5A8A-D15D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">F13F5A8A-D15D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>20</td></tr>
+      <tr><td class="mono">FC48B497-D25D-F111-BA7D-9B97B30B1200</td><td class="mono">45F6E7A6-98F3-4019-9FE6-1B8A78EE455C</td><td class="mono">FB48B497-D25D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>10</td></tr>
+      <tr><td class="mono">59D78803-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">58D78803-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>30</td></tr>
+      <tr><td class="mono">1ABA9537-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">19BA9537-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>40</td></tr>
+      <tr><td class="mono">377DBA5C-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">367DBA5C-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>50</td></tr>
+      <tr><td class="mono">EB7B3FB2-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">EA7B3FB2-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>60</td></tr>
+      <tr><td class="mono">2328ABF7-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">2228ABF7-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>70</td></tr>
+      <tr><td class="mono">7D943B09-D65D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">7C943B09-D65D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>80</td></tr>
+      <tr><td class="mono">C0D046B8-B95F-F111-BA7F-B54313133700</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">BFD046B8-B95F-F111-BA7F-B54313133700</td><td>Primary</td><td>1</td><td>90</td></tr>
+      <tr><td class="mono">055D23EC-B95F-F111-BA7F-B54313133700</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">045D23EC-B95F-F111-BA7F-B54313133700</td><td>Primary</td><td>1</td><td>100</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

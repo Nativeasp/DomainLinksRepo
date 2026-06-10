@@ -14,6 +14,85 @@
             <Setter Property="Cursor" Value="Hand" />
             <EventSetter Event="MouseLeftButtonUp" Handler="StaticLabelTextBlock_OnMouseLeftButtonUp" />
         </Style>
+        <Style TargetType="Button">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="14,4" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="#22384A" />
+            <Setter Property="Background" Value="#F6F2E9" />
+            <Setter Property="BorderBrush" Value="#CFC7B8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="9"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              Margin="0" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#EEE7DA" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#BEB19D" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#E3DACB" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#AA9B84" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SplitterToggleButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="12" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#4A5863" />
+            <Setter Property="Background" Value="#F4F1EA" />
+            <Setter Property="BorderBrush" Value="#CFC7B8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#EAE4D8" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#BFB5A3" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#DFD7C9" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#AFA28B" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="DomainStoreTabItemStyle" TargetType="TabItem">
             <Setter Property="Background" Value="#ECE7DD" />
             <Setter Property="BorderBrush" Value="#D6D0C4" />
@@ -97,10 +176,10 @@
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="DomainTreeColumn" Width="300" MinWidth="240" />
-                <ColumnDefinition Width="8" />
+                <ColumnDefinition x:Name="DomainTreeSplitterColumn" Width="18" />
                 <ColumnDefinition x:Name="SummaryColumn" Width="500" MinWidth="360" />
-                <ColumnDefinition Width="8" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="CollectionsSplitterColumn" Width="18" />
+                <ColumnDefinition x:Name="CollectionsColumn" Width="*" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"
@@ -135,7 +214,7 @@
                                     Height="30"
                                     Margin="0,0,8,0"
                                     Click="AddSharedRootButton_OnClick"
-                                    Content="Add Root" />
+                                    Content="Add Type" />
                             <Button Width="96"
                                     Height="30"
                                     Margin="0,0,8,0"
@@ -182,16 +261,47 @@
                                             Margin="0,1,0,1"
                                             CornerRadius="4">
                                         <DockPanel>
-                                            <Border DockPanel.Dock="Right"
-                                                    Margin="8,0,0,0"
-                                                    Padding="6,2"
-                                                    CornerRadius="9"
-                                                    Background="#EAF4FF">
-                                                <TextBlock Foreground="#18344A"
-                                                           FontSize="10"
-                                                           FontWeight="SemiBold"
-                                                           Text="{Binding DomainType}" />
-                                            </Border>
+                                            <TextBlock DockPanel.Dock="Right"
+                                                       Margin="10,0,0,0"
+                                                       VerticalAlignment="Center"
+                                                       FontSize="11"
+                                                       Text="{Binding TreeMetaText}">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Setter Property="Foreground" Value="#434A45" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding TreeMetaText}" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True" />
+                                                                    <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=(Selector.IsSelectionActive)}" Value="True" />
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                                            </MultiDataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Margin="0,0,8,0"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="#4C5F6B"
+                                                       FontFamily="Segoe Fluent Icons"
+                                                       FontSize="14"
+                                                       Text="{Binding IconGlyph}">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IconGlyph}" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
                                             <TextBlock VerticalAlignment="Center"
                                                        Cursor="Hand"
                                                        FontWeight="SemiBold"
@@ -212,11 +322,11 @@
                                 <RowDefinition Height="0" />
                             </Grid.RowDefinitions>
 
-                            <TextBlock FontSize="13"
-                                       FontWeight="SemiBold"
-                                       Foreground="#263746"
+                            <TextBlock x:Name="DomainTreeSummaryTextBlock"
+                                       FontSize="12"
+                                       Foreground="#5B6770"
                                        Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                       Text="Domain Type" />
+                                       Text="Domains 0 | Collections 0 | Policies 0 | Controls 0" />
 
                             <TreeView Grid.Row="2"
                                       x:Name="SharedDomainTreeView"
@@ -278,13 +388,23 @@
             </Border>
 
             <GridSplitter Grid.Column="1"
-                          Width="8"
+                          x:Name="DomainTreeSplitter"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
-                          Background="#D6D0C4"
+                          Background="Transparent"
                           ResizeBehavior="PreviousAndNext"
                           ResizeDirection="Columns"
                           ShowsPreview="True" />
+
+            <Button Grid.Column="1"
+                    x:Name="ToggleDomainTreeButton"
+                    Style="{StaticResource SplitterToggleButtonStyle}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Panel.ZIndex="2"
+                    Click="ToggleDomainTreeButton_OnClick"
+                    ToolTip="Hide or show the domain tree"
+                    Content="◀" />
 
             <Border Grid.Column="2"
                     Background="#FAF8F3"
@@ -316,10 +436,6 @@
                                         <RowDefinition Height="10" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="10" />
-                                        <RowDefinition Height="*" />
-                                        <RowDefinition Height="10" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="12" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="12" />
                                         <RowDefinition Height="Auto" />
@@ -339,12 +455,6 @@
                                     </StackPanel>
 
                                     <Grid Grid.Row="2">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="12" />
-                                            <ColumnDefinition Width="180" />
-                                        </Grid.ColumnDefinitions>
-
                                         <StackPanel>
                                             <TextBlock Foreground="#5B6770"
                                                        FontSize="11"
@@ -355,55 +465,9 @@
                                                      Height="34"
                                                      Padding="8,6" />
                                         </StackPanel>
-
-                                        <StackPanel Grid.Column="2">
-                                            <TextBlock Foreground="#5B6770"
-                                                       FontSize="11"
-                                                       Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                                       Text="Domain Type" />
-                                            <ComboBox x:Name="DomainTypeComboBox"
-                                                      Margin="0,4,0,0"
-                                                      Height="34"
-                                                      DisplayMemberPath="Name"
-                                                      SelectedValuePath="Id" />
-                                        </StackPanel>
                                     </Grid>
 
-                                    <Grid Grid.Row="4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="12" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <StackPanel>
-                                            <TextBlock Foreground="#5B6770"
-                                                       FontSize="11"
-                                                       Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                                       Text="Domain Code" />
-                                            <TextBox x:Name="DomainCodeTextBox"
-                                                     Margin="0,4,0,0"
-                                                     Height="34"
-                                                     Padding="8,6"
-                                                     IsReadOnly="True"
-                                                     Background="#F7F4EE" />
-                                        </StackPanel>
-
-                                        <StackPanel Grid.Column="2">
-                                            <TextBlock Foreground="#5B6770"
-                                                       FontSize="11"
-                                                       Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                                       Text="Parent Path" />
-                                            <TextBox x:Name="DomainParentPathTextBox"
-                                                     Margin="0,4,0,0"
-                                                     Height="34"
-                                                     Padding="8,6"
-                                                     IsReadOnly="True"
-                                                     Background="#F7F4EE" />
-                                        </StackPanel>
-                                    </Grid>
-
-                                    <StackPanel Grid.Row="6">
+                                    <StackPanel Grid.Row="4">
                                         <TextBlock Foreground="#5B6770"
                                                    FontSize="11"
                                                    Style="{StaticResource CopyableLabelTextBlockStyle}"
@@ -423,7 +487,7 @@
                                                  Padding="10" />
                                     </StackPanel>
 
-                                    <Expander Grid.Row="8"
+                                    <Expander Grid.Row="6"
                                               Header="AI Writing Assist"
                                               IsExpanded="True">
                                         <Border Margin="0,8,0,0"
@@ -584,7 +648,7 @@
                                         </Border>
                                     </Expander>
 
-                                    <StackPanel Grid.Row="10">
+                                    <StackPanel Grid.Row="8">
                                         <TextBlock Foreground="#5B6770"
                                                    FontSize="11"
                                                    Style="{StaticResource CopyableLabelTextBlockStyle}"
@@ -596,7 +660,7 @@
                                                    Text="Select a domain" />
                                     </StackPanel>
 
-                                    <StackPanel Grid.Row="12"
+                                    <StackPanel Grid.Row="10"
                                                 Orientation="Horizontal"
                                                 HorizontalAlignment="Right">
                                         <Button Width="96"
@@ -616,97 +680,51 @@
                         </Border>
                     </TabItem>
 
-                    <TabItem x:Name="CollectionsTabItem"
-                             Header="Collections"
-                             Style="{StaticResource DomainStoreTabItemStyle}">
-                        <Grid Margin="0,0,0,0">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="12" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock FontSize="17"
-                                               FontWeight="SemiBold"
-                                               Foreground="#263746"
-                                               Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                               Text="Collections" />
-                                    <TextBlock Margin="0,4,0,0"
-                                               Foreground="#5B6770"
-                                               FontSize="12"
-                                               Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                               Text="Collections group the source corpora under the selected domain." />
-                                </StackPanel>
-                                <Button Grid.Column="1"
-                                        Width="118"
-                                        Height="32"
-                                        Click="NewCollectionButton_OnClick"
-                                        Content="New Collection" />
-                                <Button Grid.Column="3"
-                                        Width="122"
-                                        Height="32"
-                                        Click="DeleteCollectionButton_OnClick"
-                                        Content="Delete Collection" />
-                            </Grid>
-
-                            <Border Grid.Row="2"
-                                    Background="#FFFFFF"
-                                    BorderBrush="#D6D0C4"
-                                    BorderThickness="1"
-                                    CornerRadius="6"
-                                    Padding="8">
-                                <ListBox x:Name="CollectionsListBox"
-                                         SelectionChanged="CollectionsListBox_OnSelectionChanged"
-                                         BorderThickness="0"
-                                         Background="Transparent">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type local:CollectionItem}">
-                                            <Border Margin="0,0,0,8"
-                                                    Padding="10"
-                                                    Background="#F8F6F1"
-                                                    BorderBrush="#E2DBCF"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6">
-                                                <StackPanel>
-                                                    <TextBlock FontWeight="SemiBold"
-                                                               Foreground="#263746"
-                                                               Text="{Binding DisplayName}" />
-                                                    <TextBlock Margin="0,4,0,0"
-                                                               Foreground="#5B6770"
-                                                               FontSize="11"
-                                                               Text="{Binding CollectionCode}" />
-                                                </StackPanel>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </Border>
-                        </Grid>
-                    </TabItem>
                     <TabItem x:Name="ControlsTabItem"
                              Header="Controls"
                              Style="{StaticResource DomainStoreTabItemStyle}">
-                        <local:DomainControlsTab x:Name="ControlsTabContent" />
+                        <Border Margin="0,0,0,0"
+                                Background="#FFFFFF"
+                                BorderBrush="#D6D0C4"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12">
+                            <local:DomainControlsTab x:Name="ControlsTabContent" />
+                        </Border>
+                    </TabItem>
+                    <TabItem x:Name="PolicyWorkspaceTabItem"
+                             Header="Policy Workspace"
+                             Style="{StaticResource DomainStoreTabItemStyle}">
+                        <Border Margin="0,0,0,0"
+                                Background="#FFFFFF"
+                                BorderBrush="#D6D0C4"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="12">
+                            <local:DomainPolicyWorkspaceTab x:Name="PolicyWorkspaceTabContent" />
+                        </Border>
                     </TabItem>
                 </TabControl>
             </Border>
 
             <GridSplitter Grid.Column="3"
-                          Width="8"
+                          x:Name="CollectionsSplitter"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
-                          Background="#D6D0C4"
+                          Background="Transparent"
                           ResizeBehavior="PreviousAndNext"
                           ResizeDirection="Columns"
                           ShowsPreview="True" />
+
+            <Button Grid.Column="3"
+                    x:Name="ToggleCollectionsPanelButton"
+                    Style="{StaticResource SplitterToggleButtonStyle}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Panel.ZIndex="2"
+                    Click="ToggleCollectionsPanelButton_OnClick"
+                    ToolTip="Hide or show the collections and documents panel"
+                    Content="▶" />
 
             <Border Grid.Column="4"
                     Background="#FAF8F3"
@@ -718,6 +736,12 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="12" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="8" />
+                        <RowDefinition x:Name="CollectionsPaneRow" Height="220" MinHeight="120" />
+                        <RowDefinition Height="12" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="8" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="12" />
                         <RowDefinition Height="*" />
@@ -733,23 +757,27 @@
                                        FontWeight="SemiBold"
                                        Foreground="#263746"
                                        Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                       Text="Documents" />
+                                       Text="Collections and Documents" />
                             <TextBlock Margin="0,4,0,0"
                                        Foreground="#5B6770"
                                        FontSize="12"
                                        Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                       Text="Documents stay directly accessible to the end user while also feeding chunked retrieval and later whole-document inclusion." />
+                                       Text="Collections group source corpora, and documents remain directly accessible while feeding retrieval." />
                         </StackPanel>
-                        <TextBlock Grid.Column="1"
-                                   x:Name="DocumentScopeTextBlock"
-                                   VerticalAlignment="Center"
-                                   Foreground="#5B6770"
-                                   FontSize="12"
-                                   Text="No collection selected" />
                     </Grid>
 
                     <StackPanel Grid.Row="2"
                                 Orientation="Horizontal">
+                        <Button Width="118"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Click="NewCollectionButton_OnClick"
+                                Content="New Collection" />
+                        <Button Width="122"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Click="DeleteCollectionButton_OnClick"
+                                Content="Delete Collection" />
                         <Button Width="94"
                                 Height="32"
                                 Margin="0,0,8,0"
@@ -771,7 +799,67 @@
                                 Content="Delete" />
                     </StackPanel>
 
-                    <DataGrid Grid.Row="4"
+                    <Border Grid.Row="4"
+                            Background="#FFFFFF"
+                            BorderBrush="#D6D0C4"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="8">
+                        <ListBox x:Name="CollectionsListBox"
+                                 SelectionChanged="CollectionsListBox_OnSelectionChanged"
+                                 BorderThickness="0"
+                                 Background="Transparent">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type local:CollectionItem}">
+                                    <Border Margin="0,0,0,8"
+                                            Padding="10"
+                                            Background="#F8F6F1"
+                                            BorderBrush="#E2DBCF"
+                                            BorderThickness="1"
+                                            CornerRadius="6">
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold"
+                                                       Foreground="#263746"
+                                                       Text="{Binding DisplayName}" />
+                                            <TextBlock Margin="0,4,0,0"
+                                                       Foreground="#5B6770"
+                                                       FontSize="11"
+                                                       Text="{Binding CollectionCode}" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+
+                    <GridSplitter Grid.Row="5"
+                                  Height="12"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  Background="#D6D0C4"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ResizeDirection="Rows"
+                                  ShowsPreview="True" />
+
+                    <Grid Grid.Row="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock FontSize="15"
+                                   FontWeight="SemiBold"
+                                   Foreground="#263746"
+                                   Style="{StaticResource CopyableLabelTextBlockStyle}"
+                                   Text="Documents" />
+                        <TextBlock Grid.Column="1"
+                                   x:Name="DocumentScopeTextBlock"
+                                   VerticalAlignment="Center"
+                                   Foreground="#5B6770"
+                                   FontSize="12"
+                                   Text="No collection selected" />
+                    </Grid>
+
+                    <DataGrid Grid.Row="10"
                               x:Name="DocumentsDataGrid"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"

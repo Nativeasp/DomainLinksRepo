@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DomainLinks - Modern desktop application for AI-powered domain management and analytics">
+    <meta name="keywords" content="DomainLinks, WPF, Python, FastAPI, AI, Machine Learning, Domain Management">
+    <title>DomainLinks Application Overview</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --accent-color: #e74c3c;
+            --bg-color: #f8f9fa;
+            --text-color: #333;
+            --success-color: #27ae60;
+            --warning-color: #f39c12;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--secondary-color);
+            padding-bottom: 0.5rem;
+            margin-bottom: 1.5rem;
+            font-size: 2.5rem;
+        }
+
+        h2 {
+            color: var(--secondary-color);
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+        }
+
+        h3 {
+            color: var(--primary-color);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            font-size: 1.3rem;
+        }
+
+        p {
+            margin-bottom: 1rem;
+        }
+
+        .section {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        a {
+            color: var(--secondary-color);
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+
+        a:hover {
+            text-decoration: underline;
+            color: var(--accent-color);
+        }
+
+        .architecture-diagram {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            overflow-x: auto;
+            margin: 1.5rem 0;
+            border: 1px solid #e0e0e0;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border-left: 4px solid var(--secondary-color);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+
+        .tech-badge {
+            display: inline-block;
+            background: var(--secondary-color);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin: 0.25rem;
+            font-weight: 500;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-active {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .status-beta {
+            background: var(--warning-color);
+            color: white;
+        }
+
+        ul {
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+        }
+
+        .highlight-box h3 {
+            color: white;
+            margin-top: 0;
+        }
+
+        code {
+            background: #f4f4f4;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 DomainLinks Application</h1>
+    <p><strong>A modern desktop application combining C# WPF front-end with a Python back-end for AI-powered domain management and analytics.</strong></p>
+
+    <div class="highlight-box">
+        <h3>✨ Key Highlights</h3>
+        <ul style="margin: 0; list-style-type: disc;">
+            <li><strong>Native Windows Performance</strong> - Built with C# WPF for optimal desktop experience</li>
+            <li><strong>AI-Powered Intelligence</strong> - Integration with Ollama for local LLM inference</li>
+            <li><strong>Scalable Architecture</strong> - RESTful APIs with FastAPI backend</li>
+            <li><strong>Enterprise-Ready</strong> - SQL Server integration with robust data management</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>📐 Architecture Overview</h2>
+        <div class="architecture-diagram">
+<pre style="font-family: 'Consolas', 'Courier New', monospace; font-size: 0.85rem; line-height: 1.4;">
+┌──────────────────────────┐          ┌──────────────────────┐          ┌──────────────────────┐
+│   DomainLinksAI (C# WPF) │◄────────│   FastAPI Backend       │◄────────│   SQL Server            │
+│   Desktop Application       │ API      │      (Python 3.11+)        │ ORM       │   Enterprise DB       │
+│   WebView2 / OpenXML         │          │   RESTful APIs           │          │   Structured Data     │
+└──────────────────────────┘          └──────────────────────┘          └──────────────────────┘
+             │                                         │                                │
+             ▼                                         ▼                                ▼
+┌──────────────────────────┐          ┌──────────────────────┐          ┌──────────────────────┐
+│   Ollama AI                   │          │   ChromaDB RAG           │          │   Document Storage    │
+│   Local LLM Models              │          │   Vector Database          │          │      (Files & Assets)  │
+│   Chat & Inference Engine     │          │   Semantic Search          │          │                       │
+└──────────────────────────┘          └──────────────────────┘          └──────────────────────┘
+</pre>
+        </div>
+        <p>This application consists of a rich desktop front-end built with C# WPF and a powerful back-end written in Python. Click the links below to explore each technology stack in detail.</p>
+    </div>
+
+    <div class="feature-grid">
+        <div class="section feature-card">
+            <h2><a href="frontend.htm">🖥️ Front-End – C# WPF</a></h2>
+            <p>The Windows Presentation Foundation (WPF) front-end provides a modern, responsive UI for Windows desktops with native performance and rich controls.</p>
+            <span class="tech-badge status-active">Production Ready</span>
+        </div>
+
+        <div class="section feature-card">
+            <h2><a href="backend.htm">⚙️ Back-End – Python</a></h2>
+            <p>The Python back-end implements the business logic, data access, AI integration, and RESTful API services for seamless client communication.</p>
+            <span class="tech-badge status-active">Production Ready</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>🔧 Tech Stack</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <h3>Front-End Technologies</h3>
+                <ul>
+                    <li><span class="tech-badge">C# WPF</span> (.NET 6+)</li>
+                    <li><span class="tech-badge">WebView2</span> (Edge Chromium)</li>
+                    <li><span class="tech-badge">XAML</span> Declarative UI</li>
+                    <li><span class="tech-badge">MVVM</span> Pattern</li>
+                    <li><span class="tech-badge">OpenXML SDK</span> Docx Export</li>
+                    <li><span class="tech-badge">Material Design</span> / MahApps.Metro</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h3>Back-End Technologies</h3>
+                <ul>
+                    <li><span class="tech-badge">FastAPI</span> (Python 3.11+)</li>
+                    <li><span class="tech-badge">SQLAlchemy</span> ORM</li>
+                    <li><span class="tech-badge">Windows OCR</span> PowerShell Integration</li>
+                    <li><span class="tech-badge">Alembic</span> Migrations</li>
+                    <li><span class="tech-badge">AsyncIO</span> Patterns</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h3>AI & ML Stack</h3>
+                <ul>
+                    <li><span class="tech-badge status-beta">Ollama</span> Local LLMs</li>
+                    <li><span class="tech-badge status-beta">ChromaDB</span> Vector Store</li>
+                    <li><span class="tech-badge">LangChain</span> Framework</li>
+                    <li><span class="tech-badge">RAG Pipelines</span> Retrieval</li>
+                </ul>
+            </div>
+             <div class="feature-card">
+                 <h3>Data & Infrastructure</h3>
+                 <ul>
+                     <li><span class="tech-badge">SQL Server</span> Enterprise DB</li>
+                     <li><span class="tech-badge">REST APIs</span> Communication</li>
+                     <li><span class="tech-badge">File Storage</span> Documents & Assets</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>📚 Documentation</h2>
+        <p>Explore detailed documentation for each component:</p>
+        <ul>
+            <li><a href="../DomainLinksAI/README.md">DomainLinksAI Project</a> - Desktop application source code</li>
+            <li><a href="../DomainLinksBackend/README.md">DomainLinksBackend Project</a> - Python backend services</li>
+            <li><a href="../planning/domainlinks-prd.md">Product Requirements</a> - Feature specifications</li>
+             <li><a href="backend.htm">Database Schema</a> - Complete 28-table database structure</li>
+            <li>Windows 10/11 (for desktop app)</li>
+            <li>.NET Framework 4.7.2 or .NET 6+ SDK</li>
+            <li>Python 3.11 or higher</li>
+            <li>SQL Server Express or Full Edition</li>
+            <li>Ollama (for local AI models)</li>
+        </ul>
+
+        <h3>Installation</h3>
+        <ol style="margin-left: 1.5rem;">
+            <li>Clone the repository</li>
+            <li>Install Python dependencies: <code>pip install -r requirements.txt</code></li>
+            <li>Configure database connection in <code>app.config</code></li>
+            <li>Run database migrations with Alembic</li>
+            <li>Launch the desktop application from Visual Studio</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h2>🔗 Quick Links</h2>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <h3>API Documentation</h3>
+                <p>Access the interactive API documentation at <code>/docs</code> when running the backend server.</p>
+                <a href="backend.htm" style="display: inline-block; margin-top: 0.5rem;">View Backend →</a>
+            </div>
+            <div class="feature-card">
+                <h3>UI Components</h3>
+                <p>Explore the WPF UI components, XAML layouts, and MVVM implementation details.</p>
+                <a href="frontend.htm" style="display: inline-block; margin-top: 0.5rem;">View Frontend →</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

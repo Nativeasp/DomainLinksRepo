@@ -10,6 +10,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Text;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -23,6 +24,7 @@ using Markdig.Extensions.Tables;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.Wpf;
 using Microsoft.Win32;
 using MarkdownTable = Markdig.Extensions.Tables.Table;
 using MarkdownTableCell = Markdig.Extensions.Tables.TableCell;
@@ -47,11 +49,19 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<CollectionItem> _projectCollections = [];
     private readonly ObservableCollection<DomainItem> _capabilityDomains = [];
     private readonly ObservableCollection<ModelOptionItem> _availableModels = [];
+    private readonly ObservableCollection<RetrievalModeItem> _retrievalModes =
+    [
+        new RetrievalModeItem { Code = "FullContext", DisplayName = "Full Context", Description = "Use the current recency-based context assembly." },
+        new RetrievalModeItem { Code = "VectorRag", DisplayName = "Vector RAG", Description = "Use semantic chunk retrieval within the selected collections." },
+        new RetrievalModeItem { Code = "Hybrid", DisplayName = "Hybrid", Description = "Blend vector retrieval with the current recency context." },
+    ];
+    private readonly DispatcherTimer _contextPreviewTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly MarkdownPipeline _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
     private readonly LocalChatStore _localChatStore = new();
     private bool _isUpdatingContextSelection;
     private bool _isTopPanelExpanded;
     private bool _isStreamingResponseActive;
+    private bool _isRefreshingContextPreview;
     private CollectionItem? _activeProjectCollection;
     private ChatThreadItem? _activeChatThread;
     private ChatThreadItem? _streamingThread;
@@ -85,8 +95,15 @@ public partial class MainWindow : Window
         ProjectCollectionsTreeView.ItemsSource = _projectCollections;
         DomainContextTreeView.ItemsSource = _capabilityDomains;
         ModelComboBox.ItemsSource = _availableModels;
+        RetrievalModeComboBox.ItemsSource = _retrievalModes;
+        RetrievalModeComboBox.SelectedValue = string.IsNullOrWhiteSpace(_settings.LastSelectedRetrievalMode)
+            ? "FullContext"
+            : _settings.LastSelectedRetrievalMode;
+        RetrievalModeComboBox.SelectionChanged += RetrievalModeComboBox_OnSelectionChanged;
+        _contextPreviewTimer.Tick += ContextPreviewTimer_OnTick;
         Loaded += MainWindow_OnLoaded;
         Closing += MainWindow_OnClosing;
+        PreviewKeyDown += MainWindow_OnPreviewKeyDown;
         UpdateTopPanelState();
         UpdatePromptPlaceholderVisibility();
     }
@@ -96,7 +113,7 @@ public partial class MainWindow : Window
         LeftPaneColumn.Width = new GridLength(_settings.LeftPaneWidth);
         RightPaneColumn.Width = new GridLength(_settings.RightPaneWidth);
         PromptInputRow.Height = new GridLength(_settings.PromptPaneHeight);
-        await ShellMenuWebView.EnsureCoreWebView2Async();
+        await EnsureWebViewReadyAsync(ShellMenuWebView);
         ShellMenuWebView.CoreWebView2.Settings.IsWebMessageEnabled = true;
         ShellMenuWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
         ShellMenuWebView.CoreWebView2.WebMessageReceived += ShellMenuWebView_OnWebMessageReceived;
@@ -105,13 +122,15 @@ public partial class MainWindow : Window
             AppContext.BaseDirectory,
             CoreWebView2HostResourceAccessKind.DenyCors);
         ShellMenuWebView.Source = new Uri($"https://{ShellHostName}/WebShell/menu-host.html");
-        await ResponseWebView.EnsureCoreWebView2Async();
+        await EnsureWebViewReadyAsync(ResponseWebView);
         ResponseWebView.CoreWebView2.Settings.IsWebMessageEnabled = true;
         ResponseWebView.CoreWebView2.WebMessageReceived += ResponseWebView_OnWebMessageReceived;
         ShowEmptyResponseState("Response output will appear here.");
+        await BackendAutoStarter.EnsureBackendIsAvailableAsync(_settings);
         await ResolveConfiguredServiceUrlsAsync();
         OpenDomainStore();
         await LoadShellAsync();
+        ScheduleContextPreviewRefresh();
     }
 
     private async Task ResolveConfiguredServiceUrlsAsync()
@@ -136,8 +155,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        var latestSettings = DomainLinksDesktopSettings.Load();
-        var saved = new DomainLinksDesktopSettings
+        var saved = DomainLinksDesktopSettings.Load() with
         {
             BackendBaseUrl = _settings.BackendBaseUrl,
             OllamaBaseUrl = _settings.OllamaBaseUrl,
@@ -150,16 +168,28 @@ public partial class MainWindow : Window
             LeftPaneWidth = LeftPaneColumn.ActualWidth,
             RightPaneWidth = RightPaneColumn.ActualWidth,
             PromptPaneHeight = PromptInputRow.ActualHeight,
-            DomainStoreWindowWidth = latestSettings.DomainStoreWindowWidth,
-            DomainStoreWindowHeight = latestSettings.DomainStoreWindowHeight,
-            DomainStoreWindowLeft = latestSettings.DomainStoreWindowLeft,
-            DomainStoreWindowTop = latestSettings.DomainStoreWindowTop,
-            DomainStoreLeftPaneWidth = latestSettings.DomainStoreLeftPaneWidth,
-            DomainStoreCenterPaneWidth = latestSettings.DomainStoreCenterPaneWidth,
-            DomainStoreCollectionsPaneHeight = latestSettings.DomainStoreCollectionsPaneHeight,
             LastSelectedModel = ModelComboBox.SelectedValue as string ?? string.Empty,
+            LastSelectedRetrievalMode = RetrievalModeComboBox.SelectedValue as string ?? "FullContext",
         };
         saved.Save();
+    }
+
+    private static async Task EnsureWebViewReadyAsync(WebView2 webView, int maxAttempts = 4)
+    {
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await webView.EnsureCoreWebView2Async();
+                return;
+            }
+            catch (COMException ex) when ((uint)ex.HResult == 0x800700AA && attempt < maxAttempts)
+            {
+                await Task.Delay(150 * attempt);
+            }
+        }
+
+        await webView.EnsureCoreWebView2Async();
     }
 
     private async Task LoadShellAsync()
@@ -354,6 +384,15 @@ public partial class MainWindow : Window
             case "new-chat":
                 AddChildHeaderButton_OnClick(AddChildHeaderButton, new RoutedEventArgs(Button.ClickEvent, AddChildHeaderButton));
                 break;
+            case "open-controls-report":
+                OpenControlsReportInBrowser();
+                break;
+            case "open-policy-draft":
+                OpenPolicyDraftInBrowser();
+                break;
+            case "open-llm-traces":
+                OpenLlmTracesInBrowser();
+                break;
             case "save-thread":
                 SaveThreadButton_OnClick(SaveThreadButton, new RoutedEventArgs(Button.ClickEvent, SaveThreadButton));
                 break;
@@ -408,6 +447,67 @@ public partial class MainWindow : Window
         _domainStoreWindow.Closed += (_, _) => _domainStoreWindow = null;
         _domainStoreWindow.Show();
         _domainStoreWindow.Activate();
+    }
+
+    private void OpenControlsReportInBrowser()
+    {
+        try
+        {
+            var baseUrl = (_settings.BackendBaseUrl ?? string.Empty).TrimEnd('/');
+            var reportUrl = $"{baseUrl}/reports/controls-smart";
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = reportUrl,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowEmptyResponseState($"Could not open controls report.{Environment.NewLine}{ex.Message}");
+        }
+    }
+
+    private void OpenPolicyDraftInBrowser()
+    {
+        try
+        {
+            var baseUrl = (_settings.BackendBaseUrl ?? string.Empty).TrimEnd('/');
+            var modelName = (ModelComboBox.SelectedValue as string)
+                ?? (ModelComboBox.SelectedItem as ModelOptionItem)?.Name
+                ?? _defaultChatModel
+                ?? "llama3.1:8b";
+            var reportUrl =
+                $"{baseUrl}/reports/policy-draft?" +
+                $"&templatePath={Uri.EscapeDataString("Policy/Policy-Template-1.01.md")}" +
+                $"&model={Uri.EscapeDataString(modelName)}";
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = reportUrl,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowEmptyResponseState($"Could not open policy draft.{Environment.NewLine}{ex.Message}");
+        }
+    }
+
+    private void OpenLlmTracesInBrowser()
+    {
+        try
+        {
+            var baseUrl = (_settings.BackendBaseUrl ?? string.Empty).TrimEnd('/');
+            var reportUrl = $"{baseUrl}/debug/llm-traces";
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = reportUrl,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowEmptyResponseState($"Could not open LLM traces.{Environment.NewLine}{ex.Message}");
+        }
     }
 
     private async Task<string> BuildStatusDetailAsync(Dictionary<string, object>? health)
@@ -478,7 +578,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ProjectRootLabel_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private async void ProjectRootLabel_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is not CollectionItem collection)
         {
@@ -490,8 +590,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        collection.IsEditing = true;
-        RefreshProjectTree();
+        await PromptRenameCollectionAsync(collection);
         e.Handled = true;
     }
 
@@ -527,7 +626,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RenameRootMenuItem_OnClick(object sender, RoutedEventArgs e)
+    private async void RenameRootMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
         var collection = ResolveCollectionFromMenuSender(sender);
         if (collection is null)
@@ -539,9 +638,8 @@ public partial class MainWindow : Window
         collection.IsSelected = true;
         _activeProjectCollection = collection;
         _activeChatThread = null;
-        collection.IsEditing = true;
-        RefreshProjectTree();
         SelectTreeItem(collection);
+        await PromptRenameCollectionAsync(collection);
     }
 
     private async void DeleteRootMenuItem_OnClick(object sender, RoutedEventArgs e)
@@ -552,10 +650,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        ClearProjectSelectionFlags();
+        collection.IsSelected = true;
+        _activeProjectCollection = collection;
+        _activeChatThread = null;
+        SelectTreeItem(collection);
         await DeleteRootCollectionAsync(collection);
     }
 
-    private void RenameChildMenuItem_OnClick(object sender, RoutedEventArgs e)
+    private async void RenameChildMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
         var thread = ResolveThreadFromMenuSender(sender);
         if (thread is null)
@@ -567,9 +670,8 @@ public partial class MainWindow : Window
         thread.IsSelected = true;
         _activeChatThread = thread;
         _activeProjectCollection = thread.ParentCollection;
-        thread.IsEditing = true;
-        RefreshProjectTree();
         SelectTreeItem(thread);
+        await PromptRenameThreadAsync(thread);
     }
 
     private async void DeleteChildMenuItem_OnClick(object sender, RoutedEventArgs e)
@@ -580,6 +682,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        ClearProjectSelectionFlags();
+        thread.IsSelected = true;
+        _activeChatThread = thread;
+        _activeProjectCollection = thread.ParentCollection;
+        SelectTreeItem(thread);
         await DeleteChatThreadAsync(thread);
     }
 
@@ -603,6 +710,7 @@ public partial class MainWindow : Window
 
             collection.DisplayName = suggestedName;
             await CommitRootRenameAsync(collection);
+            ActivateProjectCollection(collection);
             ShowEmptyResponseState($"Renamed project to: {collection.DisplayName}");
         }
         catch (Exception ex)
@@ -635,6 +743,7 @@ public partial class MainWindow : Window
                 await PersistCollectionChatsAsync(thread.ParentCollection, pushBackup: false);
             }
 
+            ActivateChatThread(thread);
             if (ReferenceEquals(_activeChatThread, thread))
             {
                 CollectionHeaderTextBlock.Text = $"Chat: {thread.Title}";
@@ -661,7 +770,7 @@ public partial class MainWindow : Window
             ?? (sender as FrameworkElement)?.DataContext as ChatThreadItem;
     }
 
-    private void ChildThreadLabel_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private async void ChildThreadLabel_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is not ChatThreadItem thread)
         {
@@ -673,8 +782,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        thread.IsEditing = true;
-        RefreshProjectTree();
+        await PromptRenameThreadAsync(thread);
         e.Handled = true;
     }
 
@@ -696,6 +804,7 @@ public partial class MainWindow : Window
         }
 
         UpdateIncludedContextSummary();
+        ScheduleContextPreviewRefresh();
     }
 
     private async void ProjectCollectionsTreeView_OnSelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
@@ -708,6 +817,7 @@ public partial class MainWindow : Window
                 _activeProjectCollection = collection;
                 _activeChatThread = null;
                 await ShowProjectCollectionStateAsync(collection);
+                ScheduleContextPreviewRefresh();
                 break;
             case ChatThreadItem thread:
                 ClearProjectSelectionFlags();
@@ -722,32 +832,40 @@ public partial class MainWindow : Window
                     CollectionContentsListBox.ItemsSource = thread.Messages.Select(message => $"{message.Role}: {message.Content}");
                     CenterModeTextBlock.Text = "Chat thread mode: asking continues this thread";
                     UpdateIncludedContextSummary();
+                    ScheduleContextPreviewRefresh();
                     break;
                 }
                 await ShowChatThreadStateAsync(thread);
+                ScheduleContextPreviewRefresh();
                 break;
         }
     }
 
     private async void ProjectCollectionsTreeView_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Back || !Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        if (e.Key is not (Key.Delete or Key.Back))
         {
             return;
         }
 
-        if (Keyboard.FocusedElement is TextBox)
+        var handled = await TryDeleteSelectedProjectTreeNodeFromKeyboardAsync();
+        e.Handled = handled;
+    }
+
+    private async void MainWindow_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Handled)
         {
             return;
         }
 
-        if (ProjectCollectionsTreeView.SelectedItem is not ChatThreadItem thread || thread.ParentCollection is null)
+        if (e.Key is not (Key.Delete or Key.Back))
         {
             return;
         }
 
-        e.Handled = true;
-        await DeleteChatThreadAsync(thread);
+        var handled = await TryDeleteSelectedProjectTreeNodeFromKeyboardAsync();
+        e.Handled = handled;
     }
 
     private async Task ShowProjectCollectionStateAsync(CollectionItem? collection)
@@ -761,6 +879,7 @@ public partial class MainWindow : Window
             CenterModeTextBlock.Text = "Project collection mode";
             ShowEmptyResponseState("Response output will appear here.");
             SetCenterMode(isRootMode: true);
+            ContextBudgetTextBlock.Text = "Context budget will appear here once there is a selected collection.";
             return;
         }
 
@@ -779,6 +898,7 @@ public partial class MainWindow : Window
             ShowEmptyResponseState("Asking from this root will create a new child chat thread.");
         }
         UpdateIncludedContextSummary();
+        ScheduleContextPreviewRefresh();
     }
 
     private async Task ShowChatThreadStateAsync(ChatThreadItem thread)
@@ -790,6 +910,7 @@ public partial class MainWindow : Window
         CenterModeTextBlock.Text = "Chat thread mode: asking continues this thread";
         RenderChatExchanges(thread);
         UpdateIncludedContextSummary();
+        ScheduleContextPreviewRefresh();
         await ScrollToLastExchangeAsync();
     }
 
@@ -858,6 +979,7 @@ public partial class MainWindow : Window
             var provisionalThreadTitle = BuildTemporaryThreadTitle(promptText);
 
             var selectedModel = ModelComboBox.SelectedValue as string;
+            var selectedRetrievalMode = RetrievalModeComboBox.SelectedValue as string ?? "FullContext";
             var startedAtUtc = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
 
@@ -920,6 +1042,7 @@ public partial class MainWindow : Window
                 prompt = promptText,
                 shortMemoryCollectionCode = shortMemoryCollection.CollectionCode,
                 longTermCollectionCodes = longTermCollections,
+                retrievalMode = selectedRetrievalMode,
                 model = selectedModel,
                 history = thread.Messages
                     .Take(Math.Max(0, thread.Messages.Count - 2))
@@ -999,6 +1122,8 @@ public partial class MainWindow : Window
                             {
                                 Answer = streamEvent.Answer,
                                 Sources = streamEvent.Sources,
+                                RetrievalMode = streamEvent.RetrievalMode,
+                                RetrievalWarning = streamEvent.RetrievalWarning,
                             }
                         );
                         pendingAssistantMessage.Stats = BuildMessageStats(streamEvent.Metrics, selectedModel, startedAtUtc, stopwatch.Elapsed);
@@ -1114,6 +1239,17 @@ public partial class MainWindow : Window
 
     private async Task DeleteRootCollectionAsync(CollectionItem collection)
     {
+        var confirmation = MessageBox.Show(
+            this,
+            $"Delete project '{collection.DisplayName}' and all of its chats?",
+            "Delete Project",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
         try
         {
             var response = await _httpClient.DeleteAsync($"/collections/{Uri.EscapeDataString(collection.CollectionCode)}");
@@ -1149,6 +1285,38 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             ShowEmptyResponseState($"Root delete failed:{Environment.NewLine}{ex.Message}");
+        }
+    }
+
+    private async Task PromptRenameCollectionAsync(CollectionItem collection)
+    {
+        var prompt = new TextPromptWindow(
+            "Rename Project",
+            "Enter a new project name.",
+            collection.DisplayName,
+            "This renames the project collection shown in the tree.")
+        {
+            Owner = this
+        };
+
+        if (prompt.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var originalName = collection.DisplayName;
+        collection.DisplayName = prompt.ResultText.Trim();
+        await CommitRootRenameAsync(collection);
+        ActivateProjectCollection(collection);
+
+        if (ReferenceEquals(_activeProjectCollection, collection))
+        {
+            CollectionHeaderTextBlock.Text = $"Collection: {collection.DisplayName}";
+        }
+
+        if (!string.Equals(collection.DisplayName, originalName, StringComparison.Ordinal))
+        {
+            ShowEmptyResponseState($"Renamed project to: {collection.DisplayName}");
         }
     }
 
@@ -1230,6 +1398,17 @@ public partial class MainWindow : Window
             return;
         }
 
+        var confirmation = MessageBox.Show(
+            this,
+            $"Delete chat '{thread.Title}' from project '{thread.ParentCollection.DisplayName}'?",
+            "Delete Chat",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
         var parent = thread.ParentCollection;
         parent.Threads.Remove(thread);
         _activeProjectCollection = parent;
@@ -1238,6 +1417,42 @@ public partial class MainWindow : Window
         SelectTreeItem(parent);
         await PersistCollectionChatsAsync(parent);
         ShowEmptyResponseState($"Deleted thread: {thread.Title}");
+    }
+
+    private async Task PromptRenameThreadAsync(ChatThreadItem thread)
+    {
+        var prompt = new TextPromptWindow(
+            "Rename Chat",
+            "Enter a new chat name.",
+            thread.Title,
+            "This renames the selected chat thread.")
+        {
+            Owner = this
+        };
+
+        if (prompt.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var originalTitle = thread.Title;
+        thread.Title = prompt.ResultText.Trim();
+        if (thread.ParentCollection is not null)
+        {
+            await PersistCollectionChatsAsync(thread.ParentCollection, pushBackup: false);
+        }
+
+        ActivateChatThread(thread);
+        if (ReferenceEquals(_activeChatThread, thread))
+        {
+            CollectionHeaderTextBlock.Text = $"Chat: {thread.Title}";
+        }
+
+        RefreshProjectTree();
+        if (!string.Equals(thread.Title, originalTitle, StringComparison.Ordinal))
+        {
+            ShowEmptyResponseState($"Renamed chat to: {thread.Title}");
+        }
     }
 
     private async void UploadButton_OnClick(object sender, RoutedEventArgs e)
@@ -1808,6 +2023,7 @@ public partial class MainWindow : Window
             "EXECUTIVE" => 10,
             "CORPORATE" => 20,
             "SERVICE" => 30,
+            "PERSONAL" => 40,
             _ => 99,
         };
     }
@@ -1969,19 +2185,39 @@ public partial class MainWindow : Window
 
     private static string BuildSourceSummary(AskResponse payload)
     {
-        if (payload.Sources.Count == 0)
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(payload.RetrievalMode))
         {
-            return string.Empty;
+            parts.Add($"Retrieval: {FormatRetrievalModeLabel(payload.RetrievalMode)}");
         }
-
-        var parts = payload.Sources
-            .Select(source => $"{source.CollectionDisplayName}: {source.SourceName}")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        if (!string.IsNullOrWhiteSpace(payload.RetrievalWarning))
+        {
+            parts.Add($"Note: {payload.RetrievalWarning.Trim()}");
+        }
+        parts.AddRange(
+            payload.Sources
+                .Select(source =>
+                {
+                    var tokenSuffix = source.TokenCount > 0 ? $" ({source.TokenCount} tokens)" : string.Empty;
+                    return $"{source.CollectionDisplayName}: {source.SourceName}{tokenSuffix}";
+                })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(source => $"Source: {source}")
+        );
 
         return parts.Count == 0
             ? string.Empty
-            : $"Sources: {string.Join("; ", parts)}";
+            : string.Join("; ", parts);
+    }
+
+    private static string FormatRetrievalModeLabel(string? retrievalMode)
+    {
+        return (retrievalMode ?? string.Empty).Trim() switch
+        {
+            "VectorRag" => "Vector RAG",
+            "Hybrid" => "Hybrid",
+            _ => "Full Context",
+        };
     }
 
     private static ChatResponseStats BuildMessageStats(
@@ -2727,6 +2963,10 @@ public partial class MainWindow : Window
         if (stats.CreatedAtUtc.HasValue)
         {
             parts.Add(stats.CreatedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+        }
+        if (stats.PromptTokens > 0 || stats.CompletionTokens > 0)
+        {
+            parts.Add($"T: {stats.PromptTokens}-{stats.CompletionTokens}");
         }
 
         return string.Join(" | ", parts);
@@ -3593,6 +3833,18 @@ Chats: {threadTitles}
     private void PromptTextBox_OnTextChanged(object sender, TextChangedEventArgs e)
     {
         UpdatePromptPlaceholderVisibility();
+        ScheduleContextPreviewRefresh();
+    }
+
+    private void RetrievalModeComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        ScheduleContextPreviewRefresh();
+    }
+
+    private void ContextPreviewTimer_OnTick(object? sender, EventArgs e)
+    {
+        _contextPreviewTimer.Stop();
+        _ = RefreshContextPreviewAsync();
     }
 
     private void PromptTextBox_OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -3617,11 +3869,131 @@ Chats: {threadTitles}
                 : Visibility.Visible;
     }
 
+    private void ScheduleContextPreviewRefresh()
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        _contextPreviewTimer.Stop();
+        _contextPreviewTimer.Start();
+    }
+
+    private async Task RefreshContextPreviewAsync()
+    {
+        if (_isRefreshingContextPreview)
+        {
+            return;
+        }
+
+        var shortMemoryCollection = _activeProjectCollection ?? GetActiveProjectCollection();
+        var promptText = PromptTextBox.Text.Trim();
+        if (shortMemoryCollection is null)
+        {
+            ContextBudgetTextBlock.Text = "Context budget will appear here once there is a selected collection.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(promptText))
+        {
+            ContextBudgetTextBlock.Text = "Context budget will appear here once there is a prompt and a selected collection.";
+            return;
+        }
+
+        try
+        {
+            _isRefreshingContextPreview = true;
+            ContextBudgetTextBlock.Text = "Estimating context budget...";
+
+            var longTermCollections = EnumerateCapabilityCollections(_capabilityDomains)
+                .Where(collection => collection.IsIncluded)
+                .Select(collection => collection.CollectionCode)
+                .ToList();
+            var retrievalMode = RetrievalModeComboBox.SelectedValue as string ?? "FullContext";
+
+            using var response = await _httpClient.PostAsJsonAsync(
+                "/ask/context-preview",
+                new
+                {
+                    prompt = promptText,
+                    shortMemoryCollectionCode = shortMemoryCollection.CollectionCode,
+                    longTermCollectionCodes = longTermCollections,
+                    retrievalMode,
+                    history = Array.Empty<object>(),
+                });
+            response.EnsureSuccessStatusCode();
+            var preview = await response.Content.ReadFromJsonAsync<ContextPreviewResponse>();
+            if (preview is null)
+            {
+                ContextBudgetTextBlock.Text = "Context budget preview returned no data.";
+                return;
+            }
+
+            var summary = $"{FormatRetrievalModeLabel(preview.RetrievalMode)}: {preview.ContextUnitCount} units, {preview.ContextTokenCount} chunk tokens, {preview.SourceCount} sources, {preview.UsedCollectionCodes.Count} collections.";
+            if (!string.IsNullOrWhiteSpace(preview.RetrievalWarning))
+            {
+                summary = $"{summary} Note: {preview.RetrievalWarning.Trim()}";
+            }
+            ContextBudgetTextBlock.Text = summary;
+        }
+        catch (Exception ex)
+        {
+            ContextBudgetTextBlock.Text = $"Context budget unavailable: {ex.Message}";
+        }
+        finally
+        {
+            _isRefreshingContextPreview = false;
+        }
+    }
+
     private CollectionItem? GetActiveProjectCollection()
     {
         return (ProjectCollectionsTreeView.SelectedItem as CollectionItem)
             ?? _activeProjectCollection
             ?? _projectCollections.FirstOrDefault();
+    }
+
+    private async Task<bool> TryDeleteSelectedProjectTreeNodeFromKeyboardAsync()
+    {
+        if (Keyboard.FocusedElement is TextBox || Keyboard.Modifiers is not (ModifierKeys.None or ModifierKeys.Control))
+        {
+            return false;
+        }
+
+        switch (ProjectCollectionsTreeView.SelectedItem)
+        {
+            case ChatThreadItem thread when thread.ParentCollection is not null:
+                await DeleteChatThreadAsync(thread);
+                return true;
+            case CollectionItem collection:
+                await DeleteRootCollectionAsync(collection);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void ActivateProjectCollection(CollectionItem collection)
+    {
+        ClearProjectSelectionFlags();
+        collection.IsSelected = true;
+        _activeProjectCollection = collection;
+        _activeChatThread = null;
+        SelectTreeItem(collection);
+    }
+
+    private void ActivateChatThread(ChatThreadItem thread)
+    {
+        ClearProjectSelectionFlags();
+        thread.IsSelected = true;
+        _activeChatThread = thread;
+        _activeProjectCollection = thread.ParentCollection;
+        if (thread.ParentCollection is not null)
+        {
+            thread.ParentCollection.IsExpanded = true;
+        }
+        SelectTreeItem(thread);
     }
 
     private void ClearProjectSelectionFlags()
@@ -3810,6 +4182,40 @@ Chats: {threadTitles}
         );
     }
 
+    private void BeginInlineRename(object item)
+    {
+        RefreshProjectTree();
+        SelectTreeItem(item);
+        FocusInlineRenameEditor(item, DispatcherPriority.Loaded);
+        FocusInlineRenameEditor(item, DispatcherPriority.ContextIdle);
+        FocusInlineRenameEditor(item, DispatcherPriority.ApplicationIdle);
+    }
+
+    private void FocusInlineRenameEditor(object item, DispatcherPriority priority)
+    {
+        Dispatcher.BeginInvoke(
+            priority,
+            new Action(() =>
+            {
+                var container = GetTreeViewItem(ProjectCollectionsTreeView, item);
+                if (container is null)
+                {
+                    return;
+                }
+
+                var editor = FindDescendant<TextBox>(container, textBox =>
+                    ReferenceEquals(textBox.Tag, item) && textBox.Visibility == Visibility.Visible);
+                if (editor is null)
+                {
+                    return;
+                }
+
+                editor.Focus();
+                Keyboard.Focus(editor);
+                editor.SelectAll();
+            }));
+    }
+
     private static TreeViewItem? GetTreeViewItem(ItemsControl parent, object item)
     {
         if (parent.ItemContainerGenerator.ContainerFromItem(item) is TreeViewItem direct)
@@ -3830,6 +4236,28 @@ Chats: {threadTitles}
             if (child is not null)
             {
                 return child;
+            }
+        }
+
+        return null;
+    }
+
+    private static T? FindDescendant<T>(DependencyObject parent, Func<T, bool>? predicate = null)
+        where T : DependencyObject
+    {
+        var childCount = VisualTreeHelper.GetChildrenCount(parent);
+        for (var i = 0; i < childCount; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T typed && (predicate is null || predicate(typed)))
+            {
+                return typed;
+            }
+
+            var nested = FindDescendant(child, predicate);
+            if (nested is not null)
+            {
+                return nested;
             }
         }
 

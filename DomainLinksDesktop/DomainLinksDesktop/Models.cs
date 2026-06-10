@@ -19,6 +19,10 @@ public sealed class DomainItem : INotifyPropertyChanged
     private string _displayName = string.Empty;
     private string _description = string.Empty;
     private string _status = string.Empty;
+    private string _iconGlyph = string.Empty;
+    private int _branchCollectionCount;
+    private int _branchPolicyCount;
+    private int _branchControlCount;
     private bool? _isIncluded;
     private bool _isExpanded;
     private bool _isSelected;
@@ -95,6 +99,49 @@ public sealed class DomainItem : INotifyPropertyChanged
         get => _status;
         set => SetField(ref _status, value);
     }
+
+    public string IconGlyph
+    {
+        get => _iconGlyph;
+        set => SetField(ref _iconGlyph, value);
+    }
+
+    public int BranchCollectionCount
+    {
+        get => _branchCollectionCount;
+        set
+        {
+            if (SetField(ref _branchCollectionCount, value))
+            {
+                OnPropertyChanged(nameof(TreeMetaText));
+            }
+        }
+    }
+
+    public int BranchPolicyCount
+    {
+        get => _branchPolicyCount;
+        set
+        {
+            if (SetField(ref _branchPolicyCount, value))
+            {
+                OnPropertyChanged(nameof(TreeMetaText));
+            }
+        }
+    }
+
+    public int BranchControlCount
+    {
+        get => _branchControlCount;
+        set
+        {
+            if (SetField(ref _branchControlCount, value))
+            {
+                OnPropertyChanged(nameof(TreeMetaText));
+            }
+        }
+    }
+
     public bool? IsIncluded
     {
         get => _isIncluded;
@@ -128,6 +175,31 @@ public sealed class DomainItem : INotifyPropertyChanged
     public ObservableCollection<DomainItem> ChildDomains { get; } = new();
     public ObservableCollection<CollectionItem> Collections { get; } = new();
     public ObservableCollection<object> TreeChildren { get; } = new();
+
+    [JsonIgnore]
+    public string TreeMetaText
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (BranchCollectionCount > 0)
+            {
+                parts.Add($"col:{BranchCollectionCount}");
+            }
+
+            if (BranchPolicyCount > 0)
+            {
+                parts.Add($"pol:{BranchPolicyCount}");
+            }
+
+            if (BranchControlCount > 0)
+            {
+                parts.Add($"ctl:{BranchControlCount}");
+            }
+
+            return parts.Count == 0 ? string.Empty : $"({string.Join("  ", parts)})";
+        }
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -286,6 +358,8 @@ public sealed class AskResponse
     public string Answer { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public List<AskSourceItem> Sources { get; set; } = [];
+    public string RetrievalMode { get; set; } = string.Empty;
+    public string RetrievalWarning { get; set; } = string.Empty;
     public AskResponseMetrics? Metrics { get; set; }
 }
 
@@ -295,6 +369,19 @@ public sealed class AskSourceItem
     public string CollectionDisplayName { get; set; } = string.Empty;
     public string SourceName { get; set; } = string.Empty;
     public string ContentUnitId { get; set; } = string.Empty;
+    public int TokenCount { get; set; }
+}
+
+public sealed class ContextPreviewResponse
+{
+    public string RetrievalMode { get; set; } = string.Empty;
+    public string RetrievalWarning { get; set; } = string.Empty;
+    public List<string> UsedCollectionCodes { get; set; } = [];
+    public int ContextUnitCount { get; set; }
+    public int ContextTokenCount { get; set; }
+    public int ContextCharCount { get; set; }
+    public int SourceCount { get; set; }
+    public List<AskSourceItem> Sources { get; set; } = [];
 }
 
 public sealed class BackendConfigResponse
@@ -322,6 +409,13 @@ public sealed class ModelOptionItem
     public string Name { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
     public string DisplayText { get; set; } = string.Empty;
+}
+
+public sealed class RetrievalModeItem
+{
+    public string Code { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
 }
 
 public sealed class ChatThreadItem : INotifyPropertyChanged
@@ -418,6 +512,8 @@ public sealed class AskStreamEvent
     public string Title { get; set; } = string.Empty;
     public string Error { get; set; } = string.Empty;
     public List<AskSourceItem> Sources { get; set; } = [];
+    public string RetrievalMode { get; set; } = string.Empty;
+    public string RetrievalWarning { get; set; } = string.Empty;
     public AskResponseMetrics? Metrics { get; set; }
 }
 
@@ -504,6 +600,72 @@ public sealed class ControlListItem
     public bool IsCurrentDomainControl { get; set; }
 }
 
+public sealed class SelectableControlItem : INotifyPropertyChanged
+{
+    private bool _isIncluded;
+    private string _groupLabel = string.Empty;
+
+    public string ControlId { get; set; } = string.Empty;
+    public string ControlCode { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string DomainCode { get; set; } = string.Empty;
+    public string DomainDisplayName { get; set; } = string.Empty;
+    public string ControlTypeCode { get; set; } = string.Empty;
+    public string ControlTypeName { get; set; } = string.Empty;
+
+    public string DetailLine =>
+        $"{DomainDisplayName} | {ControlTypeName} ({ControlTypeCode}) | {ControlCode}";
+
+    public bool IsIncluded
+    {
+        get => _isIncluded;
+        set => SetField(ref _isIncluded, value);
+    }
+
+    public string GroupLabel
+    {
+        get => _groupLabel;
+        set => SetField(ref _groupLabel, value);
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        field = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+}
+
+public sealed class ControlGroupingModeItem
+{
+    public string Code { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+}
+
+public sealed class AiControlGroupingAssignmentResponse
+{
+    public string ControlCode { get; set; } = string.Empty;
+    public string GroupLabel { get; set; } = string.Empty;
+}
+
+public sealed class AiControlGroupingResponse
+{
+    public List<AiControlGroupingAssignmentResponse> Assignments { get; set; } = [];
+    public AskResponseMetrics? Metrics { get; set; }
+}
+
 public sealed class PromptPreviewResponse
 {
     public string Model { get; set; } = string.Empty;
@@ -576,4 +738,125 @@ public sealed class LocalChatFileSnapshot
     public string FileName { get; set; } = string.Empty;
     public string JsonContent { get; set; } = string.Empty;
     public DateTimeOffset ClientModifiedUtc { get; set; }
+}
+
+public sealed class PolicyDraftContentResponse
+{
+    public string DocumentTitle { get; set; } = string.Empty;
+    public string RootDomainName { get; set; } = string.Empty;
+    public string RootDomainCode { get; set; } = string.Empty;
+    public string RootBreadcrumb { get; set; } = string.Empty;
+    public string ModelName { get; set; } = string.Empty;
+    public List<string> Objectives { get; set; } = [];
+    public List<string> Principles { get; set; } = [];
+    public List<string> Accountability { get; set; } = [];
+    public List<string> Transparency { get; set; } = [];
+    public List<string> Strategy { get; set; } = [];
+    public List<PolicyDraftControlResponse> Controls { get; set; } = [];
+    public List<string> Consequences { get; set; } = [];
+    public AskResponseMetrics? Metrics { get; set; }
+}
+
+public sealed class PolicyDraftSavedStatementResponse
+{
+    public string StatementText { get; set; } = string.Empty;
+    public int DisplayOrder { get; set; }
+    public string ReviewStatus { get; set; } = string.Empty;
+}
+
+public sealed class PolicyDraftSavedControlResponse
+{
+    public string ControlCode { get; set; } = string.Empty;
+    public string ControlName { get; set; } = string.Empty;
+    public string DomainCode { get; set; } = string.Empty;
+    public string DomainDisplayName { get; set; } = string.Empty;
+    public string ControlTypeCode { get; set; } = string.Empty;
+    public string ControlTypeName { get; set; } = string.Empty;
+    public List<PolicyDraftSavedStatementResponse> PolicyStatements { get; set; } = [];
+}
+
+public sealed class LoadedPolicyDraftResponse
+{
+    public string PolicyId { get; set; } = string.Empty;
+    public string PolicyCode { get; set; } = string.Empty;
+    public string DocumentTitle { get; set; } = string.Empty;
+    public string VersionText { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string RootDomainName { get; set; } = string.Empty;
+    public string RootDomainCode { get; set; } = string.Empty;
+    public string RootBreadcrumb { get; set; } = string.Empty;
+    public string ModelName { get; set; } = string.Empty;
+    public List<PolicyDraftSavedStatementResponse> Objectives { get; set; } = [];
+    public List<PolicyDraftSavedStatementResponse> Principles { get; set; } = [];
+    public List<PolicyDraftSavedStatementResponse> Accountability { get; set; } = [];
+    public List<PolicyDraftSavedStatementResponse> Transparency { get; set; } = [];
+    public List<PolicyDraftSavedStatementResponse> Strategy { get; set; } = [];
+    public List<PolicyDraftSavedControlResponse> Controls { get; set; } = [];
+    public List<PolicyDraftSavedStatementResponse> Consequences { get; set; } = [];
+}
+
+public sealed class PolicyDraftControlResponse
+{
+    public string ControlCode { get; set; } = string.Empty;
+    public string ControlName { get; set; } = string.Empty;
+    public string DomainCode { get; set; } = string.Empty;
+    public string DomainDisplayName { get; set; } = string.Empty;
+    public string ControlTypeCode { get; set; } = string.Empty;
+    public string ControlTypeName { get; set; } = string.Empty;
+    public List<string> PolicyStatements { get; set; } = [];
+}
+
+public sealed class PolicyDraftLineRetryResponse
+{
+    public string Text { get; set; } = string.Empty;
+    public string SectionKey { get; set; } = string.Empty;
+    public string ControlCode { get; set; } = string.Empty;
+    public string ModelName { get; set; } = string.Empty;
+    public AskResponseMetrics? Metrics { get; set; }
+}
+
+public sealed class SavedPolicyDraftResponse
+{
+    public string PolicyId { get; set; } = string.Empty;
+    public string PolicyCode { get; set; } = string.Empty;
+    public string PolicyTitle { get; set; } = string.Empty;
+    public string VersionText { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string RootDomainCode { get; set; } = string.Empty;
+    public string RootDomainName { get; set; } = string.Empty;
+    public string ModelName { get; set; } = string.Empty;
+}
+
+public sealed class PolicyListItem
+{
+    public string PolicyId { get; set; } = string.Empty;
+    public string PolicyCode { get; set; } = string.Empty;
+    public string PolicyTitle { get; set; } = string.Empty;
+    public string VersionText { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string TemplatePath { get; set; } = string.Empty;
+    public string SourceModelName { get; set; } = string.Empty;
+    public DateTimeOffset? CreatedAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public string RootDomainCode { get; set; } = string.Empty;
+    public string RootDomainName { get; set; } = string.Empty;
+    public string TemplateCode { get; set; } = string.Empty;
+    public string TemplateName { get; set; } = string.Empty;
+    public int SectionCount { get; set; }
+    public int ObjectiveCount { get; set; }
+    public int PrincipleCount { get; set; }
+    public int ControlStatementCount { get; set; }
+}
+
+public sealed class PolicyTableCountItem
+{
+    public string TableName { get; set; } = string.Empty;
+    public int TotalRows { get; set; }
+}
+
+public sealed class PolicyCleanupResponse
+{
+    public string Status { get; set; } = string.Empty;
+    public List<string> ClearedTables { get; set; } = [];
+    public List<PolicyTableCountItem> Counts { get; set; } = [];
 }

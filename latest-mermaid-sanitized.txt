@@ -1,0 +1,68 @@
+flowchart TD
+    %% ==== Users & Devices ====
+    subgraph Users["End-User Layer"]
+        direction TB
+        PC[PC / Laptop]:::device
+        Mobile[Mobile Device]:::device
+        VM[VM / Server]:::device
+    end
+
+    %% ==== Identity ====
+    Users --> AzureAD[Azure AD<br/>Conditional Access, MFA, PIM]
+
+    %% ==== Endpoint Protection ====
+    PC -->|MDfE Agent| DefenderEP[Microsoft Defender for Endpoint]:::service
+    Mobile -->|MDfE Mobile| DefenderEP
+    VM -->|Cynet XDR Agent| CynetXDR[Cynet XDR Agent]:::service
+
+    %% ==== Microsoft 365 Cloud Services ====
+    subgraph M365["Microsoft 365 Cloud"]
+        direction TB
+        Exchange[Exchange Online]:::cloud
+        SharePoint[SharePoint / OneDrive]:::cloud
+        Teams[Microsoft Teams]:::cloud
+        DefenderO365[Defender for Office 365]:::cloud
+        MCAS[Microsoft Cloud App Security]:::cloud
+    end
+
+    %% ==== FortiMail Security ====
+    Exchange --> FortiMail[FortiMail Cloud Email Security]:::security
+    SharePoint --> FortiMail
+    Teams --> FortiMail
+    PC --> FortiWeb[FortiMail Advanced Browser Security]:::security
+
+    %% ==== SIEM / SOAR ====
+    subgraph SIEM["Security Operations (Microsoft Sentinel)"]
+        direction TB
+        Sentinel[Microsoft Sentinel]:::siem
+    end
+
+    %% ==== Log Ingestion ====
+    DefenderEP --> Sentinel
+    CynetXDR --> Sentinel
+    DefenderO365 --> Sentinel
+    MCAS --> Sentinel
+    FortiMail --> Sentinel
+    AzureAD --> Sentinel
+
+    %% ==== SOC & Analyst ====
+    Sentinel --> SOC[24 7 SOC (VARS + Internal Specialist)]
+
+    %% ==== Automated Playbooks ====
+    SOC -->|Playbooks| Response[Automated Response (AIR / Cynet Orchestration)]
+
+    %% ==== Backup ====
+    subgraph Backup["Backup & Recovery"]
+        direction TB
+        Veeam[Veeam Backup for Microsoft 365]:::backup
+    end
+    Exchange --> Veeam
+    SharePoint --> Veeam
+    Teams --> Veeam
+
+    classDef device fill:#E3F2FD,stroke:#1565C0,color:#000;
+    classDef cloud fill:#FFF3E0,stroke:#EF6C00,color:#000;
+    classDef service fill:#E8F5E9,stroke:#2E7D32,color:#000;
+    classDef security fill:#FFEBEE,stroke:#C62828,color:#000;
+    classDef siem fill:#F3E5F5,stroke:#6A1B9A,color:#000;
+    classDef backup fill:#E0F7FA,stroke:#006064,color:#000;

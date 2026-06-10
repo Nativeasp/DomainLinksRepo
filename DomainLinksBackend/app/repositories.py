@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 import re
 
 from .config import Settings
@@ -63,6 +65,7 @@ def list_domain_types(settings: Settings) -> list[dict[str, object]]:
             ID,
             CODE,
             NAME,
+            DESCRIPTION,
             DOMAIN_LEVEL,
             DISPLAY_ORDER
         FROM dbo.DomainTypes
@@ -72,6 +75,86 @@ def list_domain_types(settings: Settings) -> list[dict[str, object]]:
         """,
     )
     return [_normalize_row(row) for row in rows]
+
+
+def create_domain_type(
+    settings: Settings,
+    *,
+    name: str,
+    description: str | None = None,
+) -> dict[str, object]:
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Domain type name is required.")
+
+    normalized_code = re.sub(r"[^A-Z0-9]+", "_", normalized_name.upper()).strip("_")
+    if not normalized_code:
+        raise ValueError("Domain type code could not be generated from the provided name.")
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            IF EXISTS (
+                SELECT 1
+                FROM dbo.DomainTypes
+                WHERE CODE = ?
+                   OR NAME = ?
+            )
+            BEGIN
+                THROW 51000, 'A domain type with this code or name already exists.', 1;
+            END;
+
+            DECLARE @NextDomainLevel INT =
+                COALESCE((SELECT MAX(DOMAIN_LEVEL) + 1 FROM dbo.DomainTypes), 1);
+            DECLARE @NextDisplayOrder INT =
+                COALESCE((SELECT MAX(DISPLAY_ORDER) + 10 FROM dbo.DomainTypes), 10);
+
+            INSERT INTO dbo.DomainTypes (
+                CODE,
+                NAME,
+                DOMAIN_LEVEL,
+                PRIMARY_FOCUS,
+                KEY_QUESTION,
+                DESCRIPTION,
+                DISPLAY_ORDER,
+                EFFECTIVE_START_DATE
+            )
+            OUTPUT
+                inserted.ID,
+                inserted.CODE,
+                inserted.NAME,
+                inserted.DESCRIPTION,
+                inserted.DOMAIN_LEVEL,
+                inserted.DISPLAY_ORDER
+            VALUES (
+                ?,
+                ?,
+                @NextDomainLevel,
+                ?,
+                ?,
+                ?,
+                @NextDisplayOrder,
+                CAST(SYSDATETIME() AS date)
+            );
+            """,
+            [
+                normalized_code,
+                normalized_name,
+                normalized_code,
+                normalized_name,
+                f"{normalized_name} knowledge, planning, governance, work, and supporting context.",
+                f"What belongs in {normalized_name}?",
+                description,
+            ],
+        )
+        row = cursor.fetchone()
+        conn.commit()
+
+    if row is None:
+        raise ValueError("Domain type was not created.")
+
+    return _normalize_row(_row_to_dict(cursor, row))
 
 
 def list_control_types(settings: Settings) -> list[dict[str, object]]:
@@ -142,6 +225,67 @@ def list_controls_for_branch(settings: Settings, branch_root_domain_code: str) -
             c.DisplayName
         """,
         [root_domain_code, *domain_codes, root_domain_code],
+    )
+    normalized_rows = [_normalize_row(row) for row in rows]
+    deduped_rows: list[dict[str, object]] = []
+    seen_control_ids: set[str] = set()
+    for row in normalized_rows:
+        control_id = str(row.get("ControlId") or "").strip().lower()
+        if not control_id or control_id in seen_control_ids:
+            continue
+        seen_control_ids.add(control_id)
+        deduped_rows.append(row)
+    return deduped_rows
+
+
+def list_controls_report_rows(settings: Settings) -> list[dict[str, object]]:
+    rows = fetch_all(
+        settings,
+        """
+        SELECT
+            d.DomainId,
+            d.DomainCode,
+            d.DisplayName AS DomainDisplayName,
+            d.Description AS DomainDescription,
+            d.DisplayOrder AS DomainDisplayOrder,
+            d.Status AS DomainStatus,
+            p.DisplayName AS ParentDisplayName,
+            gp.DisplayName AS GrandparentDisplayName,
+            dc.DomainControlId,
+            dc.RelationshipType,
+            dc.IsPrimary,
+            dc.DisplayOrder AS DomainControlDisplayOrder,
+            c.ControlId,
+            c.ControlTypeId,
+            c.ControlCode,
+            c.DisplayName,
+            c.Description,
+            c.ControlObjective,
+            c.Owner,
+            c.EvidenceExpectation,
+            c.Status,
+            ct.CODE AS ControlTypeCode,
+            ct.NAME AS ControlTypeName,
+            ct.DESCRIPTION AS ControlTypeDescription
+        FROM dbo.DomainControls dc
+        JOIN dbo.Domains d
+            ON d.DomainId = dc.DomainId
+        LEFT JOIN dbo.Domains p
+            ON p.DomainId = d.DomainParentId
+        LEFT JOIN dbo.Domains gp
+            ON gp.DomainId = p.DomainParentId
+        JOIN dbo.Controls c
+            ON c.ControlId = dc.ControlId
+        JOIN dbo.ControlTypes ct
+            ON ct.ID = c.ControlTypeId
+        WHERE d.Status = 'Active'
+          AND c.Status IN ('Draft', 'Active')
+        ORDER BY
+            d.DisplayOrder,
+            d.DisplayName,
+            dc.DisplayOrder,
+            c.DisplayName
+        """,
     )
     return [_normalize_row(row) for row in rows]
 
@@ -494,6 +638,566 @@ def list_retrieval_profiles(settings: Settings) -> list[dict[str, object]]:
     return [_normalize_row(row) for row in rows]
 
 
+def get_retrieval_profile(settings: Settings, profile_code: str) -> dict[str, object] | None:
+    row = fetch_one(
+        settings,
+        """
+        SELECT
+            RetrievalProfileId,
+            ProfileCode,
+            DisplayName,
+            RetrievalMode,
+            TopK,
+            MaxContextTokens,
+            IncludeSummaries,
+            IncludeChunks,
+            IncludeWholeDocs,
+            Status
+        FROM dbo.RetrievalProfiles
+        WHERE ProfileCode = ? AND Status = 'Active'
+        """,
+        [profile_code],
+    )
+    return _normalize_row(row) if row else None
+
+
+def get_default_embedding_profile(settings: Settings) -> dict[str, object]:
+    row = fetch_one(
+        settings,
+        """
+        SELECT TOP 1
+            EmbeddingProfileId,
+            ProfileCode,
+            Provider,
+            ModelName,
+            VectorDimension,
+            DistanceMetric,
+            IsDefault,
+            Status
+        FROM dbo.EmbeddingProfiles
+        WHERE Status = 'Active'
+        ORDER BY CASE WHEN IsDefault = 1 THEN 0 ELSE 1 END, ProfileCode
+        """,
+    )
+    if not row:
+        raise ValueError("No active embedding profile is configured.")
+    return _normalize_row(row)
+
+
+def list_unembedded_content_units(
+    settings: Settings,
+    *,
+    embedding_profile_id: str,
+    limit: int = 100,
+    collection_codes: list[str] | None = None,
+    document_id: str | None = None,
+) -> list[dict[str, object]]:
+    filters = [
+        "cu.Status = 'Active'",
+        "d.Status = 'Active'",
+        "c.Status = 'Active'",
+        "emb.ContentUnitId IS NULL",
+    ]
+    params: list[object] = [embedding_profile_id]
+
+    if collection_codes:
+        cleaned_codes = [_slug_code(code) for code in collection_codes if code and code.strip()]
+        if cleaned_codes:
+            placeholders = ", ".join("?" for _ in cleaned_codes)
+            filters.append(f"c.CollectionCode IN ({placeholders})")
+            params.extend(cleaned_codes)
+
+    if document_id:
+        filters.append("d.DocumentId = ?")
+        params.append(document_id)
+
+    query = f"""
+        SELECT TOP ({max(1, min(limit, 2000))})
+            cu.ContentUnitId,
+            cu.DocumentId,
+            cu.UnitOrdinal,
+            cu.UnitType,
+            cu.TokenCount,
+            cu.BodyText,
+            d.SourceName,
+            c.CollectionCode,
+            c.DisplayName AS CollectionDisplayName
+        FROM dbo.ContentUnits cu
+        JOIN dbo.Documents d
+            ON d.DocumentId = cu.DocumentId
+        JOIN dbo.Collections c
+            ON c.CollectionId = d.CollectionId
+        LEFT JOIN dbo.ContentUnitEmbeddings768 emb
+            ON emb.ContentUnitId = cu.ContentUnitId
+           AND emb.EmbeddingProfileId = ?
+        WHERE {" AND ".join(filters)}
+        ORDER BY d.CreatedAtUtc, cu.UnitOrdinal
+    """
+    rows = fetch_all(settings, query, params)
+    return [_normalize_row(row) for row in rows]
+
+
+def upsert_content_unit_embeddings(
+    settings: Settings,
+    *,
+    embedding_profile_id: str,
+    vector_dimension: int,
+    embeddings: list[dict[str, object]],
+) -> dict[str, object]:
+    inserted_count = 0
+    updated_count = 0
+    if not embeddings:
+        return {"insertedCount": 0, "updatedCount": 0}
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        for item in embeddings:
+            content_unit_id = str(item.get("contentUnitId") or "").strip()
+            vector_text = str(item.get("vectorText") or "").strip()
+            embedding_hash = item.get("embeddingHash")
+            if not content_unit_id or not vector_text:
+                continue
+
+            cursor.execute(
+                """
+                SELECT COUNT(1)
+                FROM dbo.ContentUnitEmbeddings768
+                WHERE ContentUnitId = ? AND EmbeddingProfileId = ?
+                """,
+                [content_unit_id, embedding_profile_id],
+            )
+            exists = int(cursor.fetchone()[0] or 0) > 0
+            cursor.execute(
+                """
+                DELETE FROM dbo.ContentUnitEmbeddings768
+                WHERE ContentUnitId = ? AND EmbeddingProfileId = ?
+                """,
+                [content_unit_id, embedding_profile_id],
+            )
+            cursor.execute(
+                f"""
+                INSERT INTO dbo.ContentUnitEmbeddings768 (
+                    ContentUnitId,
+                    EmbeddingProfileId,
+                    EmbeddingVector,
+                    EmbeddingHash
+                )
+                VALUES (?, ?, CAST(CONVERT(nvarchar(max), ?) AS VECTOR({vector_dimension})), ?)
+                """,
+                [content_unit_id, embedding_profile_id, vector_text, embedding_hash],
+            )
+            if exists:
+                updated_count += 1
+            else:
+                inserted_count += 1
+        conn.commit()
+
+    return {
+        "insertedCount": inserted_count,
+        "updatedCount": updated_count,
+    }
+
+
+def search_similar_content_units(
+    settings: Settings,
+    *,
+    embedding_profile_id: str,
+    vector_dimension: int,
+    query_vector_text: str,
+    collection_codes: list[str],
+    top_k: int = 8,
+) -> list[dict[str, object]]:
+    cleaned_codes = [_slug_code(code) for code in collection_codes if code and code.strip()]
+    if not cleaned_codes:
+        return []
+
+    placeholders = ", ".join("?" for _ in cleaned_codes)
+    params: list[object] = [query_vector_text, embedding_profile_id, *cleaned_codes]
+    rows = fetch_all(
+        settings,
+        f"""
+        SELECT TOP ({max(1, min(top_k, 100))})
+            c.CollectionCode,
+            c.DisplayName AS CollectionDisplayName,
+            d.DocumentId,
+            d.SourceName,
+            cu.ContentUnitId,
+            cu.UnitType,
+            cu.UnitOrdinal,
+            cu.TokenCount,
+            cu.BodyText,
+            CAST(VECTOR_DISTANCE('cosine', emb.EmbeddingVector, CAST(CONVERT(nvarchar(max), ?) AS VECTOR({vector_dimension}))) AS float) AS Distance
+        FROM dbo.ContentUnitEmbeddings768 emb
+        JOIN dbo.ContentUnits cu
+            ON cu.ContentUnitId = emb.ContentUnitId
+        JOIN dbo.Documents d
+            ON d.DocumentId = cu.DocumentId
+        JOIN dbo.Collections c
+            ON c.CollectionId = d.CollectionId
+        WHERE emb.EmbeddingProfileId = ?
+          AND c.CollectionCode IN ({placeholders})
+          AND c.Status = 'Active'
+          AND d.Status = 'Active'
+          AND cu.Status = 'Active'
+        ORDER BY Distance ASC, d.CreatedAtUtc DESC, cu.UnitOrdinal ASC
+        """,
+        params,
+    )
+    return [_normalize_row(row) for row in rows]
+
+
+def list_embedding_status(
+    settings: Settings,
+    *,
+    embedding_profile_id: str,
+) -> dict[str, object]:
+    totals = fetch_one(
+        settings,
+        """
+        SELECT
+            COUNT(1) AS TotalContentUnitCount,
+            SUM(COALESCE(cu.TokenCount, 0)) AS TotalTokenCount,
+            SUM(CASE WHEN emb.ContentUnitId IS NOT NULL THEN 1 ELSE 0 END) AS EmbeddedContentUnitCount,
+            SUM(CASE WHEN emb.ContentUnitId IS NOT NULL THEN COALESCE(cu.TokenCount, 0) ELSE 0 END) AS EmbeddedTokenCount
+        FROM dbo.ContentUnits cu
+        JOIN dbo.Documents d
+            ON d.DocumentId = cu.DocumentId
+        JOIN dbo.Collections c
+            ON c.CollectionId = d.CollectionId
+        LEFT JOIN dbo.ContentUnitEmbeddings768 emb
+            ON emb.ContentUnitId = cu.ContentUnitId
+           AND emb.EmbeddingProfileId = ?
+        WHERE c.Status = 'Active'
+          AND d.Status = 'Active'
+          AND cu.Status = 'Active'
+        """,
+        [embedding_profile_id],
+    ) or {}
+
+    per_collection = fetch_all(
+        settings,
+        """
+        SELECT
+            c.CollectionCode,
+            c.DisplayName AS CollectionDisplayName,
+            COUNT(1) AS TotalContentUnitCount,
+            SUM(COALESCE(cu.TokenCount, 0)) AS TotalTokenCount,
+            SUM(CASE WHEN emb.ContentUnitId IS NOT NULL THEN 1 ELSE 0 END) AS EmbeddedContentUnitCount,
+            SUM(CASE WHEN emb.ContentUnitId IS NOT NULL THEN COALESCE(cu.TokenCount, 0) ELSE 0 END) AS EmbeddedTokenCount
+        FROM dbo.ContentUnits cu
+        JOIN dbo.Documents d
+            ON d.DocumentId = cu.DocumentId
+        JOIN dbo.Collections c
+            ON c.CollectionId = d.CollectionId
+        LEFT JOIN dbo.ContentUnitEmbeddings768 emb
+            ON emb.ContentUnitId = cu.ContentUnitId
+           AND emb.EmbeddingProfileId = ?
+        WHERE c.Status = 'Active'
+          AND d.Status = 'Active'
+          AND cu.Status = 'Active'
+        GROUP BY c.CollectionCode, c.DisplayName
+        ORDER BY c.DisplayName, c.CollectionCode
+        """,
+        [embedding_profile_id],
+    )
+
+    normalized_totals = _normalize_row(totals)
+    total_content_unit_count = int(normalized_totals.get("TotalContentUnitCount") or 0)
+    embedded_content_unit_count = int(normalized_totals.get("EmbeddedContentUnitCount") or 0)
+    total_token_count = int(normalized_totals.get("TotalTokenCount") or 0)
+    embedded_token_count = int(normalized_totals.get("EmbeddedTokenCount") or 0)
+    return {
+        "totalContentUnitCount": total_content_unit_count,
+        "embeddedContentUnitCount": embedded_content_unit_count,
+        "unembeddedContentUnitCount": max(0, total_content_unit_count - embedded_content_unit_count),
+        "totalTokenCount": total_token_count,
+        "embeddedTokenCount": embedded_token_count,
+        "unembeddedTokenCount": max(0, total_token_count - embedded_token_count),
+        "collections": [
+            {
+                **_normalize_row(row),
+                "UnembeddedContentUnitCount": max(
+                    0,
+                    int(row.get("TotalContentUnitCount") or 0) - int(row.get("EmbeddedContentUnitCount") or 0),
+                ),
+                "UnembeddedTokenCount": max(
+                    0,
+                    int(row.get("TotalTokenCount") or 0) - int(row.get("EmbeddedTokenCount") or 0),
+                ),
+            }
+            for row in per_collection
+        ],
+    }
+
+
+def list_policies(settings: Settings) -> list[dict[str, object]]:
+    rows = fetch_all(
+        settings,
+        """
+        SELECT
+            p.PolicyId,
+            p.PolicyCode,
+            p.PolicyTitle,
+            p.VersionText,
+            p.Status,
+            p.TemplatePath,
+            p.SourceModelName,
+            p.CreatedAtUtc,
+            p.UpdatedAtUtc,
+            d.DomainCode AS RootDomainCode,
+            d.DisplayName AS RootDomainName,
+            pt.TemplateCode,
+            pt.TemplateName,
+            (
+                SELECT COUNT(1)
+                FROM dbo.PolicySections ps
+                WHERE ps.PolicyId = p.PolicyId
+            ) AS SectionCount,
+            (
+                SELECT COUNT(1)
+                FROM dbo.PolicyObjectives po
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = po.PolicySectionId
+                WHERE ps.PolicyId = p.PolicyId
+            ) AS ObjectiveCount,
+            (
+                SELECT COUNT(1)
+                FROM dbo.PolicyPrinciples pp
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = pp.PolicySectionId
+                WHERE ps.PolicyId = p.PolicyId
+            ) AS PrincipleCount,
+            (
+                SELECT COUNT(1)
+                FROM dbo.PolicyControlStatements pcs
+                WHERE pcs.PolicyId = p.PolicyId
+            ) AS ControlStatementCount
+        FROM dbo.Policies p
+        JOIN dbo.Domains d
+            ON d.DomainId = p.RootDomainId
+        LEFT JOIN dbo.PolicyTemplates pt
+            ON pt.PolicyTemplateId = p.PolicyTemplateId
+        ORDER BY
+            COALESCE(p.UpdatedAtUtc, p.CreatedAtUtc) DESC,
+            p.PolicyTitle,
+            p.PolicyCode
+        """,
+    )
+    return [_normalize_row(row) for row in rows]
+
+
+def get_policy_presentation_data(settings: Settings, policy_id: str) -> dict[str, object]:
+    policy_row = fetch_one(
+        settings,
+        """
+        SELECT
+            p.PolicyId,
+            p.PolicyCode,
+            p.PolicyTitle,
+            p.VersionText,
+            p.Status,
+            p.TemplatePath,
+            p.SourceModelName,
+            p.CreatedAtUtc,
+            p.UpdatedAtUtc,
+            d.DomainCode AS RootDomainCode,
+            d.DisplayName AS RootDomainName,
+            pt.TemplateCode,
+            pt.TemplateName
+        FROM dbo.Policies p
+        JOIN dbo.Domains d
+            ON d.DomainId = p.RootDomainId
+        LEFT JOIN dbo.PolicyTemplates pt
+            ON pt.PolicyTemplateId = p.PolicyTemplateId
+        WHERE p.PolicyId = ?
+        """,
+        [policy_id],
+    )
+    if not policy_row:
+        raise ValueError(f"Policy not found for id '{policy_id}'.")
+
+    sections = {
+        "policy": _normalize_row(policy_row),
+        "objectives": [
+            _normalize_row(row)
+            for row in fetch_all(
+                settings,
+                """
+                SELECT
+                    po.PolicyObjectiveId,
+                    po.StatementText,
+                    po.DisplayOrder,
+                    po.ReviewStatus
+                FROM dbo.PolicyObjectives po
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = po.PolicySectionId
+                WHERE ps.PolicyId = ?
+                ORDER BY po.DisplayOrder, po.PolicyObjectiveId
+                """,
+                [policy_id],
+            )
+        ],
+        "principles": [
+            _normalize_row(row)
+            for row in fetch_all(
+                settings,
+                """
+                SELECT
+                    pp.PolicyPrincipleId,
+                    pp.StatementText,
+                    pp.DisplayOrder,
+                    pp.ReviewStatus,
+                    pr.PrincipleCode,
+                    pr.Name AS PrincipleName,
+                    ppl.UsageMode
+                FROM dbo.PolicyPrinciples pp
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = pp.PolicySectionId
+                LEFT JOIN dbo.PolicyPrincipleLinks ppl
+                    ON ppl.PolicyPrincipleId = pp.PolicyPrincipleId
+                LEFT JOIN dbo.Principles pr
+                    ON pr.PrincipleId = ppl.PrincipleId
+                WHERE ps.PolicyId = ?
+                ORDER BY pp.DisplayOrder, pp.PolicyPrincipleId
+                """,
+                [policy_id],
+            )
+        ],
+        "accountability": [
+            _normalize_row(row)
+            for row in fetch_all(
+                settings,
+                """
+                SELECT
+                    pas.PolicyAccountabilityStatementId,
+                    pas.StatementText,
+                    pas.DisplayOrder,
+                    pas.ReviewStatus
+                FROM dbo.PolicyAccountabilityStatements pas
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = pas.PolicySectionId
+                WHERE ps.PolicyId = ?
+                ORDER BY pas.DisplayOrder, pas.PolicyAccountabilityStatementId
+                """,
+                [policy_id],
+            )
+        ],
+        "transparency": [
+            _normalize_row(row)
+            for row in fetch_all(
+                settings,
+                """
+                SELECT
+                    pts.PolicyTransparencyStatementId,
+                    pts.StatementText,
+                    pts.DisplayOrder,
+                    pts.ReviewStatus
+                FROM dbo.PolicyTransparencyStatements pts
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = pts.PolicySectionId
+                WHERE ps.PolicyId = ?
+                ORDER BY pts.DisplayOrder, pts.PolicyTransparencyStatementId
+                """,
+                [policy_id],
+            )
+        ],
+        "strategy": [
+            _normalize_row(row)
+            for row in fetch_all(
+                settings,
+                """
+                SELECT
+                    pss.PolicyStrategyStatementId,
+                    pss.StatementText,
+                    pss.DisplayOrder,
+                    pss.ReviewStatus
+                FROM dbo.PolicyStrategyStatements pss
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = pss.PolicySectionId
+                WHERE ps.PolicyId = ?
+                ORDER BY pss.DisplayOrder, pss.PolicyStrategyStatementId
+                """,
+                [policy_id],
+            )
+        ],
+        "consequences": [
+            _normalize_row(row)
+            for row in fetch_all(
+                settings,
+                """
+                SELECT
+                    pc.PolicyConsequenceId,
+                    pc.StatementText,
+                    pc.DisplayOrder,
+                    pc.ReviewStatus
+                FROM dbo.PolicyConsequences pc
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = pc.PolicySectionId
+                WHERE ps.PolicyId = ?
+                ORDER BY pc.DisplayOrder, pc.PolicyConsequenceId
+                """,
+                [policy_id],
+            )
+        ],
+        "controlStatements": [
+            _normalize_row(row)
+            for row in fetch_all(
+                settings,
+                """
+                SELECT
+                    pcs.PolicyControlStatementId,
+                    pcs.StatementText,
+                    pcs.DisplayOrder,
+                    pcs.ReviewStatus,
+                    c.ControlCode,
+                    c.DisplayName AS ControlName,
+                    ct.CODE AS ControlTypeCode,
+                    ct.NAME AS ControlTypeName
+                FROM dbo.PolicyControlStatements pcs
+                JOIN dbo.Controls c
+                    ON c.ControlId = pcs.ControlId
+                JOIN dbo.ControlTypes ct
+                    ON ct.ID = c.ControlTypeId
+                WHERE pcs.PolicyId = ?
+                ORDER BY c.DisplayName, pcs.DisplayOrder, pcs.PolicyControlStatementId
+                """,
+                [policy_id],
+            )
+        ],
+    }
+    return sections
+
+
+def get_latest_policy_for_root_domain(settings: Settings, root_domain_code: str) -> dict[str, object] | None:
+    normalized_root_domain_code = _slug_code(root_domain_code)
+    row = fetch_one(
+        settings,
+        """
+        SELECT TOP 1
+            p.PolicyId
+        FROM dbo.Policies p
+        JOIN dbo.Domains d
+            ON d.DomainId = p.RootDomainId
+        WHERE d.DomainCode = ?
+        ORDER BY
+            CASE p.Status
+                WHEN 'Draft' THEN 0
+                WHEN 'Active' THEN 1
+                WHEN 'Retired' THEN 2
+                WHEN 'Archived' THEN 3
+                ELSE 4
+            END,
+            COALESCE(p.UpdatedAtUtc, p.CreatedAtUtc) DESC,
+            p.PolicyTitle
+        """,
+        [normalized_root_domain_code],
+    )
+    if not row:
+        return None
+
+    return get_policy_presentation_data(settings, str(row.get("PolicyId") or ""))
+
+
 def reorder_root_domains(
     settings: Settings,
     parent_domain_id: str | None,
@@ -559,6 +1263,49 @@ def reorder_root_domains(
         "parentDomainId": normalized_parent_domain_id,
         "orientationCode": normalized_orientation_code,
         "domainCodes": normalized_codes,
+    }
+
+
+def reorder_domain_types(
+    settings: Settings,
+    *,
+    ordered_type_ids: list[int],
+) -> dict[str, object]:
+    normalized_ids = [int(type_id) for type_id in ordered_type_ids]
+    if not normalized_ids:
+        raise ValueError("At least one domain type id is required to reorder domain types.")
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        cursor.execute(
+            f"""
+            SELECT ID
+            FROM dbo.DomainTypes
+            WHERE ID IN ({placeholders})
+            """,
+            normalized_ids,
+        )
+        found_ids = {int(row[0]) for row in cursor.fetchall()}
+        missing_ids = [type_id for type_id in normalized_ids if type_id not in found_ids]
+        if missing_ids:
+            raise ValueError(f"Domain types not found for reorder: {', '.join(str(item) for item in missing_ids)}.")
+
+        for index, type_id in enumerate(normalized_ids, start=1):
+            cursor.execute(
+                """
+                UPDATE dbo.DomainTypes
+                SET DISPLAY_ORDER = ?
+                WHERE ID = ?
+                """,
+                [index * 10, type_id],
+            )
+
+        conn.commit()
+
+    return {
+        "status": "reordered",
+        "typeIds": normalized_ids,
     }
 
 
@@ -706,6 +1453,7 @@ def update_domain(
     description: str | None = None,
     domain_type_id: int | None = None,
     domain_orientation_id: int | None = None,
+    parent_domain_id: str | None = None,
 ) -> dict[str, object]:
     with get_connection(settings) as conn:
         cursor = conn.cursor()
@@ -717,10 +1465,11 @@ def update_domain(
                 Description = ?,
                 DomainTypeId = ?,
                 DomainOrientationId = ?,
+                DomainParentId = ?,
                 UpdatedAtUtc = SYSUTCDATETIME()
             WHERE DomainCode = ? AND Status = 'Active'
             """,
-            [display_name.strip(), description, domain_type_id, domain_orientation_id, _slug_code(domain_code)],
+            [display_name.strip(), description, domain_type_id, domain_orientation_id, parent_domain_id, _slug_code(domain_code)],
         )
         if cursor.rowcount == 0:
             raise ValueError(f"Active domain not found for code '{domain_code}'.")
@@ -731,6 +1480,113 @@ def update_domain(
         if row.get("DomainCode") == _slug_code(domain_code):
             return row
     raise ValueError(f"Domain '{domain_code}' was updated but could not be reloaded.")
+
+
+def move_domain(
+    settings: Settings,
+    *,
+    domain_code: str,
+    new_parent_domain_code: str | None = None,
+    new_domain_type_id: int | None = None,
+) -> dict[str, object]:
+    normalized_domain_code = _slug_code(domain_code)
+    normalized_parent_code = _slug_code(new_parent_domain_code) if new_parent_domain_code and new_parent_domain_code.strip() else None
+    if normalized_parent_code and normalized_domain_code == normalized_parent_code:
+        raise ValueError("A domain cannot be moved under itself.")
+
+    domains = list_domains(settings)
+    domain_by_code = {
+        str(row.get("DomainCode") or ""): row
+        for row in domains
+        if row.get("DomainCode")
+    }
+
+    source_domain = domain_by_code.get(normalized_domain_code)
+    target_parent = domain_by_code.get(normalized_parent_code) if normalized_parent_code else None
+    if source_domain is None:
+        raise ValueError(f"Active domain not found for code '{domain_code}'.")
+    if normalized_parent_code and target_parent is None:
+        raise ValueError(f"Active target parent domain not found for code '{new_parent_domain_code}'.")
+    if target_parent is None and new_domain_type_id is None:
+        raise ValueError("A target parent domain or target domain type is required.")
+
+    source_domain_id = str(source_domain.get("DomainId") or "").strip()
+    target_parent_id = str(target_parent.get("DomainId") or "").strip() if target_parent is not None else ""
+    current_parent_id = str(source_domain.get("DomainParentId") or "").strip()
+    current_domain_type_id = int(source_domain.get("DomainTypeId") or 0)
+    target_domain_type_id = int(new_domain_type_id or target_parent.get("DomainTypeId") or 0)
+    if current_parent_id == target_parent_id and current_domain_type_id == target_domain_type_id:
+        return source_domain
+
+    child_domains_by_parent_id: dict[str, list[dict[str, object]]] = {}
+    for domain in domains:
+        parent_id = str(domain.get("DomainParentId") or "").strip()
+        if parent_id:
+            child_domains_by_parent_id.setdefault(parent_id, []).append(domain)
+
+    def _is_descendant(candidate_id: str, ancestor_id: str) -> bool:
+        for child in child_domains_by_parent_id.get(ancestor_id, []):
+            child_id = str(child.get("DomainId") or "").strip()
+            if child_id == candidate_id or _is_descendant(candidate_id, child_id):
+                return True
+        return False
+
+    if target_parent is not None and _is_descendant(target_parent_id, source_domain_id):
+        raise ValueError("A domain cannot be moved under one of its descendants.")
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        if target_parent is None:
+            cursor.execute(
+                """
+                SELECT COALESCE(MAX(DisplayOrder) + 10, 10)
+                FROM dbo.Domains
+                WHERE Status = 'Active'
+                  AND DomainParentId IS NULL
+                  AND DomainTypeId = ?
+                """,
+                [target_domain_type_id],
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT COALESCE(MAX(DisplayOrder) + 10, 10)
+                FROM dbo.Domains
+                WHERE Status = 'Active'
+                  AND DomainParentId = ?
+                """,
+                [target_parent_id],
+            )
+        next_display_order = int(cursor.fetchone()[0] or 10)
+
+        cursor.execute(
+            """
+            UPDATE dbo.Domains
+            SET
+                DomainParentId = ?,
+                DomainTypeId = ?,
+                DomainOrientationId = ?,
+                DisplayOrder = ?,
+                UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE DomainCode = ? AND Status = 'Active'
+            """,
+            [
+                target_parent_id or None,
+                target_domain_type_id,
+                target_parent.get("DomainOrientationId") if target_parent is not None else source_domain.get("DomainOrientationId"),
+                next_display_order,
+                normalized_domain_code,
+            ],
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Domain '{domain_code}' could not be moved.")
+        conn.commit()
+
+    rows = list_domains(settings)
+    for row in rows:
+        if row.get("DomainCode") == normalized_domain_code:
+            return row
+    raise ValueError(f"Domain '{domain_code}' was moved but could not be reloaded.")
 
 
 def get_domain_delete_preview(
@@ -1661,6 +2517,535 @@ def mark_user_chat_backup_files_restored(
             [app_user_id],
         )
         conn.commit()
+
+
+def clear_policy_tables(settings: Settings) -> dict[str, object]:
+    table_names = [
+        "PolicyControlStatements",
+        "PolicyPrincipleLinks",
+        "PrincipleRelations",
+        "PolicyObjectives",
+        "PolicyPrinciples",
+        "PolicyAccountabilityStatements",
+        "PolicyTransparencyStatements",
+        "PolicyStrategyStatements",
+        "PolicyConsequences",
+        "PolicySections",
+        "Policies",
+        "Principles",
+        "PolicyTemplates",
+    ]
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM dbo.PolicyControlStatements;")
+        cursor.execute("DELETE FROM dbo.PolicyPrincipleLinks;")
+        cursor.execute("DELETE FROM dbo.PrincipleRelations;")
+        cursor.execute("DELETE FROM dbo.PolicyObjectives;")
+        cursor.execute("DELETE FROM dbo.PolicyPrinciples;")
+        cursor.execute("DELETE FROM dbo.PolicyAccountabilityStatements;")
+        cursor.execute("DELETE FROM dbo.PolicyTransparencyStatements;")
+        cursor.execute("DELETE FROM dbo.PolicyStrategyStatements;")
+        cursor.execute("DELETE FROM dbo.PolicyConsequences;")
+        cursor.execute("DELETE FROM dbo.PolicySections;")
+        cursor.execute("DELETE FROM dbo.Policies;")
+        cursor.execute("DELETE FROM dbo.Principles;")
+        cursor.execute("DELETE FROM dbo.PolicyTemplates;")
+
+        cursor.execute(
+            """
+            SELECT 'PolicyTemplates' AS TableName, COUNT(*) AS TotalRows FROM dbo.PolicyTemplates
+            UNION ALL SELECT 'Policies', COUNT(*) FROM dbo.Policies
+            UNION ALL SELECT 'PolicySections', COUNT(*) FROM dbo.PolicySections
+            UNION ALL SELECT 'PolicyObjectives', COUNT(*) FROM dbo.PolicyObjectives
+            UNION ALL SELECT 'PolicyPrinciples', COUNT(*) FROM dbo.PolicyPrinciples
+            UNION ALL SELECT 'PolicyAccountabilityStatements', COUNT(*) FROM dbo.PolicyAccountabilityStatements
+            UNION ALL SELECT 'PolicyTransparencyStatements', COUNT(*) FROM dbo.PolicyTransparencyStatements
+            UNION ALL SELECT 'PolicyStrategyStatements', COUNT(*) FROM dbo.PolicyStrategyStatements
+            UNION ALL SELECT 'PolicyConsequences', COUNT(*) FROM dbo.PolicyConsequences
+            UNION ALL SELECT 'Principles', COUNT(*) FROM dbo.Principles
+            UNION ALL SELECT 'PolicyPrincipleLinks', COUNT(*) FROM dbo.PolicyPrincipleLinks
+            UNION ALL SELECT 'PrincipleRelations', COUNT(*) FROM dbo.PrincipleRelations
+            UNION ALL SELECT 'PolicyControlStatements', COUNT(*) FROM dbo.PolicyControlStatements
+            ORDER BY TableName
+            """
+        )
+        count_rows = [_normalize_row(_row_to_dict(cursor, row)) for row in cursor.fetchall()]
+        conn.commit()
+
+    return {
+        "status": "ok",
+        "clearedTables": table_names,
+        "counts": count_rows,
+    }
+
+
+def upsert_policy_draft(
+    settings: Settings,
+    *,
+    root_domain_code: str,
+    policy_code: str,
+    policy_title: str,
+    version_text: str,
+    status: str,
+    template_path: str | None,
+    template_body: str | None,
+    source_model_name: str | None,
+    objectives: list[dict[str, object]],
+    principles: list[dict[str, object]],
+    accountability: list[dict[str, object]],
+    transparency: list[dict[str, object]],
+    strategy: list[dict[str, object]],
+    consequences: list[dict[str, object]],
+    control_statements: list[dict[str, object]],
+) -> dict[str, object]:
+    normalized_root_domain_code = _slug_code(root_domain_code)
+    normalized_policy_code = _slug_code(policy_code)
+    normalized_status = status.strip() or "Draft"
+    normalized_version_text = version_text.strip() or "0.01"
+    normalized_policy_title = policy_title.strip()
+    if not normalized_policy_title:
+        raise ValueError("Policy title is required.")
+
+    normalized_template_path = template_path.strip() if template_path else None
+    template_code = None
+    template_name = None
+    if normalized_template_path:
+        template_code = _slug_code(Path(normalized_template_path).stem)
+        template_name = Path(normalized_template_path).stem.replace("-", " ").replace("_", " ").strip() or template_code
+
+    section_definitions = [
+        ("OBJECTIVE", "Objectives", 10),
+        ("PRINCIPLE", "Principles", 20),
+        ("ACCOUNTABILITY", "Accountability", 30),
+        ("TRANSPARENCY", "Transparency", 40),
+        ("STRATEGY", "Strategy", 50),
+        ("CONTROL_POLICY", "Policy Statements By Control", 60),
+        ("CONSEQUENCE", "Consequences", 70),
+    ]
+
+    section_payloads: dict[str, list[dict[str, object]]] = {
+        "OBJECTIVE": objectives,
+        "PRINCIPLE": principles,
+        "ACCOUNTABILITY": accountability,
+        "TRANSPARENCY": transparency,
+        "STRATEGY": strategy,
+        "CONSEQUENCE": consequences,
+    }
+
+    def _normalize_statement_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        normalized_rows: list[dict[str, object]] = []
+        for index, row in enumerate(rows, start=1):
+            statement_text = str(row.get("statementText") or "").strip()
+            if not statement_text:
+                continue
+            display_order = int(row.get("displayOrder") or (index * 10))
+            review_status = str(row.get("reviewStatus") or "Pending").strip() or "Pending"
+            normalized_rows.append(
+                {
+                    "statementText": statement_text,
+                    "displayOrder": display_order,
+                    "reviewStatus": review_status,
+                }
+            )
+        return normalized_rows
+
+    normalized_section_payloads = {
+        code: _normalize_statement_rows(rows)
+        for code, rows in section_payloads.items()
+    }
+    normalized_control_statements = []
+    for index, row in enumerate(control_statements, start=1):
+        control_code = str(row.get("controlCode") or "").strip()
+        statement_text = str(row.get("statementText") or "").strip()
+        if not control_code or not statement_text:
+            continue
+        normalized_control_statements.append(
+            {
+                "controlCode": _slug_code(control_code),
+                "statementText": statement_text,
+                "displayOrder": int(row.get("displayOrder") or (index * 10)),
+                "reviewStatus": str(row.get("reviewStatus") or "Pending").strip() or "Pending",
+            }
+        )
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT DomainId, DomainCode, DisplayName
+            FROM dbo.Domains
+            WHERE DomainCode = ? AND Status = 'Active'
+            """,
+            [normalized_root_domain_code],
+        )
+        domain_row = cursor.fetchone()
+        if domain_row is None:
+            raise ValueError(f"Active root domain not found for code '{root_domain_code}'.")
+        root_domain_id = domain_row.DomainId
+        root_domain_name = domain_row.DisplayName
+
+        policy_template_id = None
+        if template_code:
+            cursor.execute(
+                """
+                SELECT PolicyTemplateId
+                FROM dbo.PolicyTemplates
+                WHERE TemplateCode = ?
+                """,
+                [template_code],
+            )
+            template_row = cursor.fetchone()
+            if template_row is None:
+                cursor.execute(
+                    """
+                    INSERT INTO dbo.PolicyTemplates (
+                        TemplateCode,
+                        TemplateName,
+                        VersionText,
+                        TemplateBody,
+                        SourcePath,
+                        Status
+                    )
+                    OUTPUT inserted.PolicyTemplateId
+                    VALUES (?, ?, ?, ?, ?, 'Draft')
+                    """,
+                    [
+                        template_code,
+                        template_name,
+                        normalized_version_text,
+                        template_body,
+                        normalized_template_path,
+                    ],
+                )
+                policy_template_id = cursor.fetchone().PolicyTemplateId
+            else:
+                policy_template_id = template_row.PolicyTemplateId
+                cursor.execute(
+                    """
+                    UPDATE dbo.PolicyTemplates
+                    SET
+                        TemplateName = ?,
+                        VersionText = ?,
+                        TemplateBody = COALESCE(?, TemplateBody),
+                        SourcePath = ?,
+                        UpdatedAtUtc = SYSUTCDATETIME()
+                    WHERE PolicyTemplateId = ?
+                    """,
+                    [
+                        template_name,
+                        normalized_version_text,
+                        template_body,
+                        normalized_template_path,
+                        policy_template_id,
+                    ],
+                )
+
+        cursor.execute(
+            """
+            SELECT PolicyId
+            FROM dbo.Policies
+            WHERE PolicyCode = ?
+            """,
+            [normalized_policy_code],
+        )
+        policy_row = cursor.fetchone()
+        if policy_row is None:
+            cursor.execute(
+                """
+                INSERT INTO dbo.Policies (
+                    RootDomainId,
+                    PolicyTemplateId,
+                    PolicyCode,
+                    PolicyTitle,
+                    VersionText,
+                    Status,
+                    TemplatePath,
+                    SourceModelName
+                )
+                OUTPUT inserted.PolicyId
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    root_domain_id,
+                    policy_template_id,
+                    normalized_policy_code,
+                    normalized_policy_title,
+                    normalized_version_text,
+                    normalized_status,
+                    normalized_template_path,
+                    source_model_name,
+                ],
+            )
+            policy_id = cursor.fetchone().PolicyId
+        else:
+            policy_id = policy_row.PolicyId
+            cursor.execute(
+                """
+                UPDATE dbo.Policies
+                SET
+                    RootDomainId = ?,
+                    PolicyTemplateId = ?,
+                    PolicyTitle = ?,
+                    VersionText = ?,
+                    Status = ?,
+                    TemplatePath = ?,
+                    SourceModelName = ?,
+                    UpdatedAtUtc = SYSUTCDATETIME(),
+                    UpdatedBy = SUSER_SNAME()
+                WHERE PolicyId = ?
+                """,
+                [
+                    root_domain_id,
+                    policy_template_id,
+                    normalized_policy_title,
+                    normalized_version_text,
+                    normalized_status,
+                    normalized_template_path,
+                    source_model_name,
+                    policy_id,
+                ],
+            )
+
+        section_ids: dict[str, object] = {}
+        for section_code, section_name, display_order in section_definitions:
+            cursor.execute(
+                """
+                SELECT PolicySectionId
+                FROM dbo.PolicySections
+                WHERE PolicyId = ? AND SectionCode = ?
+                """,
+                [policy_id, section_code],
+            )
+            section_row = cursor.fetchone()
+            if section_row is None:
+                cursor.execute(
+                    """
+                    INSERT INTO dbo.PolicySections (
+                        PolicyId,
+                        SectionCode,
+                        SectionName,
+                        DisplayOrder,
+                        Status
+                    )
+                    OUTPUT inserted.PolicySectionId
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    [policy_id, section_code, section_name, display_order, normalized_status],
+                )
+                section_ids[section_code] = cursor.fetchone().PolicySectionId
+            else:
+                section_ids[section_code] = section_row.PolicySectionId
+                cursor.execute(
+                    """
+                    UPDATE dbo.PolicySections
+                    SET
+                        SectionName = ?,
+                        DisplayOrder = ?,
+                        Status = ?,
+                        UpdatedAtUtc = SYSUTCDATETIME()
+                    WHERE PolicySectionId = ?
+                    """,
+                    [section_name, display_order, normalized_status, section_ids[section_code]],
+                )
+
+        cursor.execute(
+            """
+            DELETE FROM dbo.PolicyPrincipleLinks
+            WHERE PolicyPrincipleId IN (
+                SELECT PolicyPrincipleId
+                FROM dbo.PolicyPrinciples
+                WHERE PolicySectionId = ?
+            )
+            """,
+            [section_ids["PRINCIPLE"]],
+        )
+        cursor.execute("DELETE FROM dbo.PolicyObjectives WHERE PolicySectionId = ?", [section_ids["OBJECTIVE"]])
+        cursor.execute("DELETE FROM dbo.PolicyPrinciples WHERE PolicySectionId = ?", [section_ids["PRINCIPLE"]])
+        cursor.execute("DELETE FROM dbo.PolicyAccountabilityStatements WHERE PolicySectionId = ?", [section_ids["ACCOUNTABILITY"]])
+        cursor.execute("DELETE FROM dbo.PolicyTransparencyStatements WHERE PolicySectionId = ?", [section_ids["TRANSPARENCY"]])
+        cursor.execute("DELETE FROM dbo.PolicyStrategyStatements WHERE PolicySectionId = ?", [section_ids["STRATEGY"]])
+        cursor.execute("DELETE FROM dbo.PolicyConsequences WHERE PolicySectionId = ?", [section_ids["CONSEQUENCE"]])
+        cursor.execute("DELETE FROM dbo.PolicyControlStatements WHERE PolicyId = ?", [policy_id])
+
+        section_insert_map = {
+            "OBJECTIVE": "dbo.PolicyObjectives",
+            "PRINCIPLE": "dbo.PolicyPrinciples",
+            "ACCOUNTABILITY": "dbo.PolicyAccountabilityStatements",
+            "TRANSPARENCY": "dbo.PolicyTransparencyStatements",
+            "STRATEGY": "dbo.PolicyStrategyStatements",
+            "CONSEQUENCE": "dbo.PolicyConsequences",
+        }
+
+        inserted_policy_principles: list[tuple[object, int, str]] = []
+        for section_code, table_name in section_insert_map.items():
+            for index, row in enumerate(normalized_section_payloads.get(section_code, []), start=1):
+                if section_code == "PRINCIPLE":
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {table_name} (
+                            PolicySectionId,
+                            StatementText,
+                            DisplayOrder,
+                            ReviewStatus
+                        )
+                        OUTPUT inserted.PolicyPrincipleId
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        [
+                            section_ids[section_code],
+                            row["statementText"],
+                            row["displayOrder"],
+                            row["reviewStatus"],
+                        ],
+                    )
+                    policy_principle_id = cursor.fetchone().PolicyPrincipleId
+                    inserted_policy_principles.append((policy_principle_id, index, str(row["statementText"])))
+                else:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO {table_name} (
+                            PolicySectionId,
+                            StatementText,
+                            DisplayOrder,
+                            ReviewStatus
+                        )
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        [
+                            section_ids[section_code],
+                            row["statementText"],
+                            row["displayOrder"],
+                            row["reviewStatus"],
+                        ],
+                    )
+
+        for policy_principle_id, index, statement_text in inserted_policy_principles:
+            principle_code = f"{normalized_policy_code}-principle-{index:02d}"
+            principle_name = f"{normalized_policy_title} Principle {index}"
+            cursor.execute(
+                """
+                SELECT PrincipleId
+                FROM dbo.Principles
+                WHERE PrincipleCode = ?
+                """,
+                [principle_code],
+            )
+            principle_row = cursor.fetchone()
+            if principle_row is None:
+                cursor.execute(
+                    """
+                    INSERT INTO dbo.Principles (
+                        OriginDomainId,
+                        PrincipleCode,
+                        Name,
+                        StatementText,
+                        VisibilityScope,
+                        LifecycleStatus
+                    )
+                    OUTPUT inserted.PrincipleId
+                    VALUES (?, ?, ?, ?, 'Private', 'Draft')
+                    """,
+                    [
+                        root_domain_id,
+                        principle_code,
+                        principle_name,
+                        statement_text,
+                    ],
+                )
+                principle_id = cursor.fetchone().PrincipleId
+            else:
+                principle_id = principle_row.PrincipleId
+                cursor.execute(
+                    """
+                    UPDATE dbo.Principles
+                    SET
+                        OriginDomainId = ?,
+                        Name = ?,
+                        StatementText = ?,
+                        UpdatedAtUtc = SYSUTCDATETIME(),
+                        UpdatedBy = SUSER_SNAME()
+                    WHERE PrincipleId = ?
+                    """,
+                    [
+                        root_domain_id,
+                        principle_name,
+                        statement_text,
+                        principle_id,
+                    ],
+                )
+
+            cursor.execute(
+                """
+                INSERT INTO dbo.PolicyPrincipleLinks (
+                    PolicyPrincipleId,
+                    PrincipleId,
+                    UsageMode
+                )
+                VALUES (?, ?, 'Override')
+                """,
+                [policy_principle_id, principle_id],
+            )
+
+        if normalized_control_statements:
+            control_codes = [row["controlCode"] for row in normalized_control_statements]
+            placeholders = ", ".join("?" for _ in control_codes)
+            cursor.execute(
+                f"""
+                SELECT ControlId, ControlCode
+                FROM dbo.Controls
+                WHERE ControlCode IN ({placeholders})
+                """,
+                control_codes,
+            )
+            control_lookup = {
+                str(row.ControlCode): row.ControlId
+                for row in cursor.fetchall()
+            }
+            missing_control_codes = [
+                row["controlCode"]
+                for row in normalized_control_statements
+                if row["controlCode"] not in control_lookup
+            ]
+            if missing_control_codes:
+                raise ValueError(f"Control codes not found for policy control statements: {', '.join(sorted(set(missing_control_codes)))}.")
+
+            for row in normalized_control_statements:
+                cursor.execute(
+                    """
+                    INSERT INTO dbo.PolicyControlStatements (
+                        PolicySectionId,
+                        PolicyId,
+                        ControlId,
+                        StatementText,
+                        DisplayOrder,
+                        ReviewStatus
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        section_ids["CONTROL_POLICY"],
+                        policy_id,
+                        control_lookup[row["controlCode"]],
+                        row["statementText"],
+                        row["displayOrder"],
+                        row["reviewStatus"],
+                    ],
+                )
+
+        conn.commit()
+
+    return {
+        "PolicyId": str(policy_id),
+        "PolicyCode": normalized_policy_code,
+        "PolicyTitle": normalized_policy_title,
+        "VersionText": normalized_version_text,
+        "Status": normalized_status,
+        "RootDomainCode": normalized_root_domain_code,
+        "RootDomainName": root_domain_name,
+        "ModelName": source_model_name or "",
+    }
 
 
 def _normalize_row(row: dict[str, object]) -> dict[str, object]:

@@ -19,6 +19,14 @@ Create a virtual environment, install dependencies, then run:
 uvicorn app.main:app --reload --host 127.0.0.1 --port 5056
 ```
 
+If you launch the WPF desktop app with its default settings, it now attempts to auto-start this backend on application load when `http://127.0.0.1:5056/health` is unavailable. That auto-start expects the backend virtual environment at:
+
+```text
+DomainLinksBackend\.venv\Scripts\python.exe
+```
+
+If you want to disable or change that behavior, update `DomainLinksDesktop/domainlinks-desktop.settings.json`.
+
 Use `127.0.0.1` when the desktop app and backend run inside the same Windows VM. If the backend must be reached from the Mac host or another device, bind to `0.0.0.0` and allow the port through Windows Firewall:
 
 ```powershell

@@ -2,6 +2,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Windows;
+using System.ComponentModel;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 
@@ -19,8 +20,24 @@ public partial class OcrViewerWindow : Window
     public OcrViewerWindow(string ollamaBaseUrl)
     {
         InitializeComponent();
+        var settings = DomainLinksDesktopSettings.Load();
+        Width = settings.OcrViewerWindowWidth;
+        Height = settings.OcrViewerWindowHeight;
+        if (!double.IsNaN(settings.OcrViewerWindowLeft))
+        {
+            Left = settings.OcrViewerWindowLeft;
+        }
+        if (!double.IsNaN(settings.OcrViewerWindowTop))
+        {
+            Top = settings.OcrViewerWindowTop;
+        }
+        if (settings.OcrViewerPreviewPaneWidth > 0)
+        {
+            PreviewColumn.Width = new GridLength(settings.OcrViewerPreviewPaneWidth);
+        }
         _ocrService = new DeepSeekOcrService(ollamaBaseUrl);
         Loaded += OcrViewerWindow_OnLoaded;
+        Closing += OcrViewerWindow_OnClosing;
         UpdateActionState();
     }
 
@@ -166,6 +183,19 @@ public partial class OcrViewerWindow : Window
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void OcrViewerWindow_OnClosing(object? sender, CancelEventArgs e)
+    {
+        var saved = DomainLinksDesktopSettings.Load() with
+        {
+            OcrViewerWindowWidth = Width,
+            OcrViewerWindowHeight = Height,
+            OcrViewerWindowLeft = Left,
+            OcrViewerWindowTop = Top,
+            OcrViewerPreviewPaneWidth = PreviewColumn.ActualWidth,
+        };
+        saved.Save();
     }
 
     private void UpdateActionState()

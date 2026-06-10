@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Policy Draft Preview</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 24px; color: #111; background: #fff; }
+    .meta { color: #5a5a5a; margin-bottom: 18px; }
+    .shell { max-width: 1100px; margin: 0 auto; }
+    .toolbar { border: 1px solid #d7d7d7; background: #f7f7f7; padding: 14px; margin-bottom: 20px; }
+    label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+    input { width: 100%; padding: 8px; border: 1px solid #c8c8c8; }
+    .row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; }
+    button { padding: 9px 14px; border: 1px solid #18344a; background: #18344a; color: #fff; cursor: pointer; }
+    .doc { border: 1px solid #ddd; background: #fff; padding: 32px; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; margin-top: 24px; }
+    h3 { font-size: 16px; margin-top: 18px; }
+    p, li { line-height: 1.5; }
+    ul { margin-top: 0; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1>Policy Draft Preview</h1>
+    <p class="meta">Generated from the selected root domain, its branch domains, and its controls using the local model.</p>
+    <form class="toolbar" method="get" action="/reports/policy-draft">
+      <div class="row">
+        <div>
+          <label for="domainCode">Domain Code</label>
+          <select id="domainCode" name="domainCode" style="width: 100%; padding: 8px; border: 1px solid #c8c8c8;">
+            <option value="">Select a domain...</option>
+<option value="executive-administration">Executive Administration</option>
+<option value="performance-management" selected>Executive Administration / Performance Management</option>
+          </select>
+        </div>
+        <div>
+          <label for="templatePath">Template Path</label>
+          <input id="templatePath" name="templatePath" value="Policy/Policy-Template-1.01.md" />
+        </div>
+        <div>
+          <label for="model">Model</label>
+          <input id="model" name="model" value="llama3.1:8b" />
+        </div>
+        <div>
+          <button type="submit">Generate</button>
+        </div>
+      </div>
+    </form>
+    <div class="meta">Direct draft URL: <code>/reports/policy-draft?domainCode=performance-management</code></div>
+    <div class="meta">Root domain: <strong>Performance Management</strong></div>
+    <div class="meta">Model used: <strong>llama3.1:8b</strong></div>
+    <div class="doc">
+      <h1>Performance Management Policy</h1>
+<p>Policy Number: PM001</p>
+<p>Version Number: 1.0</p>
+<p>Supersedes: N/A</p>
+<p>Policy Category: Executive Administration</p>
+<p>Approved Date: 2023-02-15</p>
+<p>Policy Owner: Executive Strategic Officer</p>
+<p>Governing Body: Executive Administration</p>
+<p>Effective Date: 2023-03-01</p>
+<p>Policy Author: [Name]</p>
+<p>Review Cycle: Annual</p>
+<p>Inquiries: [Contact]</p>
+<p>Strategic Objective: To maintain relevance and accuracy of performance weights as business priorities shift.</p>
+<h2>1.0 Context</h2>
+<h3>Objective</h3>
+<p><strong>1.1</strong> The main outcome of this policy is to ensure that development plans are aligned with organizational strategic objectives, promoting accountability and transparency in career growth strategies.</p>
+<p><strong>1.2</strong> This policy provides practical guidance on how to maintain relevance and accuracy of performance weights as business priorities shift, ensuring consistent application of weightings across roles based on strategic development goals rather than subjective adjustment.</p>
+<h3>Principles</h3>
+<p><strong>1.3</strong> The work should be framed and focused on long-term career planning and development.</p>
+<p><strong>1.4</strong> This policy supports the value or business purpose requirement for the work by promoting a structured growth trajectory for employee responsibilities, preventing stagnation in development plans.</p>
+<p><strong>1.5</strong> Development plans should explicitly demonstrate a progression from basic to complex deliverables across Year 1, Year 2, and Year 3.</p>
+<h3>Accountability and Transparency</h3>
+<p><strong>1.8</strong> Managers are responsible for ensuring that assigned role weightings align with approved individual development plans, promoting accountability and transparency in how career development strategies influence performance evaluation criteria.</p>
+<p><strong>1.9</strong> Documentation access matters to ensure employees are aware of and committed to the specific responsibilities and complexity tiers outlined for them.</p>
+<h3>Strategy</h3>
+<p><strong>1.12</strong> The policy supports collaboration and transparency goals by requiring managers to certify annually that assigned role weightings align with approved individual development plans.</p>
+<p><strong>1.13</strong> This policy maintains relevance of development goals within the strategic horizon over time, ensuring long-term career planning is initiated and documented across the workforce.</p>
+<h2>2.0 Application</h2>
+<p><strong>2.1</strong> This policy applies to all employees who require a three-year development roadmap for their role.</p>
+<h2>3.0 Policy</h2>
+<h3>Mandatory Three-Year Employee Development Plan</h3>
+<p><strong>3.1</strong> Employees are required to have a formal three-year development plan on file, which outlines their career growth trajectory and responsibilities.</p>
+<p><strong>3.2</strong> The policy owner is responsible for ensuring that all employees have a signed 3-year development plan document accessible in the HR management system.</p>
+<h3>Mandatory Signed Role Approval</h3>
+<p><strong>3.21</strong> Employees must have a signed Role &amp; Responsibility (R&amp;R) document on file before performance metrics are set, ensuring performance expectations are formally documented and agreed upon prior to evaluation periods.</p>
+<p><strong>3.22</strong> The policy owner is responsible for maintaining the R&amp;R documents with timestamped approval records in the HRIS repository.</p>
+<h3>Mandatory Annual Development Plan Refresh Cycle</h3>
+<p><strong>3.24</strong> Employees must have their development plans reviewed and updated annually, ensuring relevance of development goals within the strategic horizon over time.</p>
+<p><strong>3.25</strong> The policy owner is responsible for tracking system logs or signed forms demonstrating annual update approvals for employee plans.</p>
+<h3>Mandatory Annual Weighting Calibration Review</h3>
+<p><strong>3.27</strong> The organization must conduct an annual review of weighting logic to ensure alignment with current organizational strategy, maintaining relevance and accuracy of performance weights as business priorities shift.</p>
+<p><strong>3.28</strong> The policy owner is responsible for tracking the evidence of annual calibration meeting agenda and attendance record showing leadership review of weight allocations.</p>
+<h3>Mandatory Development Plan Weighting Methodology Definition</h3>
+<p><strong>3.29</strong> A formal rules document must be established to outline the mapping logic between development plan levels and role weighting percentages, ensuring consistent application of weightings across roles based on strategic development goals.</p>
+<p><strong>3.30</strong> The policy owner is responsible for maintaining the approved policy document outlining the mapping logic between development plan levels and role weighting percentages.</p>
+<h3>Mandatory Three-Year Complexity Escalation Standard</h3>
+<p><strong>3.31</strong> Development plans must explicitly demonstrate a progression from basic to complex deliverables across Year 1, Year 2, and Year 3, preventing stagnation in development plans by enforcing a structured growth trajectory for employee responsibilities.</p>
+<p><strong>3.32</strong> The policy owner is responsible for tracking the approved development plans showing distinct, increasing complexity levels in Year 1 versus Year 3 deliverables.</p>
+<h3>Mandatory Employee Development Plan Acknowledgement Rule</h3>
+<p><strong>3.33</strong> Employees must formally acknowledge they understand the three-year role progression expectations defined in their development plan, ensuring employees are aware of and committed to the specific responsibilities and complexity tiers outlined for them.</p>
+<p><strong>3.34</strong> The policy owner is responsible for maintaining signed acknowledgment forms or digital confirmation logs from employees regarding their development plan structure.</p>
+<h3>Mandatory Role Weighting Deviation Justification Record</h3>
+<p><strong>3.35</strong> A documented rationale must be provided when weighting allocation deviates from standard matrices due to development plan changes, preventing arbitrary weighting adjustments by requiring traceable links between development needs and performance expectations.</p>
+<p><strong>3.36</strong> The policy owner is responsible for tracking audit logs containing specific justifications linked to approved development plan modifications for the role.</p>
+<h3>Mandatory Manager Alignment Certification on Development Weightings</h3>
+<p><strong>3.37</strong> Managers must certify annually that assigned role weightings align with approved individual development plans, promoting accountability and transparency in how career development strategies influence performance evaluation criteria.</p>
+<p><strong>3.38</strong> The policy owner is responsible for tracking signed certification records from management confirming adherence between weighting structures and development plan scopes.</p>
+<h3>Mandatory Strategic Alignment Verification on Development Milestones</h3>
+<p><strong>3.39</strong> Development milestones must be explicitly mapped against organizational strategic objectives, aligning individual growth trajectories with corporate strategic direction.</p>
+<p><strong>3.40</strong> The policy owner is responsible for maintaining documented linkage matrix or system fields mapping development goals to strategic pillars.</p>
+<h2>4.0 Consequences</h2>
+<h3>Non-Compliance Consequences</h3>
+<p><strong>4.1</strong> Failure to comply with this policy may result in disciplinary action, up to and including termination of employment.</p>
+<p><strong>4.2</strong> Employees who fail to adhere to this policy may be subject to performance improvement plans or other corrective actions as determined by management.</p>
+<h2>5.0 Foundational Records and Documents</h2>
+<h3>Performance Management Policy</h3>
+<p>*   This policy is based on the organizational strategic objectives outlined in the current strategic reference used by the organization.</p>
+<p>*   The development of this policy is guided by the principles of long-term career planning, development, and transparency.</p>
+<h3>Supporting Mandate Domains or Related Organizational Functions</h3>
+<p>*   This policy supports collaboration and transparency goals by promoting a structured growth trajectory for employee responsibilities.</p>
+<p>*   The organization must ensure that all employees have a signed 3-year development plan document accessible in the HR management system.</p>
+<h2>6.0 Definitions Abbreviations &amp; Acronyms</h2>
+<h3>Role Weighting Percentage</h3>
+<p>*   A percentage assigned to an individual&#x27;s role based on their performance and career goals.</p>
+<h3>Development Plan</h3>
+<p>*   A formal document outlining an employee&#x27;s career growth trajectory and responsibilities over a three-year period.</p>
+<h3>Performance Evaluation Criteria</h3>
+<p>*   The criteria used to evaluate an employee&#x27;s performance, including their role weightings, development plan, and other relevant factors.</p>
+<h2>7.0 Forms &amp; Templates</h2>
+<p>(ANNEX A) Mandatory Three-Year Development Plan Template</p>
+<p>(ANNEX B) Mandatory Signed Role Approval Form</p>
+<p>(ANNEX C) Mandatory Annual Weighting Calibration Review Checklist</p>
+<h2>8.0 References</h2>
+<p>*   Current strategic reference used by the organization (e.g., Strategic Objectives Document).</p>
+<p>*   Organizational policy on career development and employee performance evaluation.</p>
+<h2>9.0 Signatories</h2>
+<p>Authority Signatures:</p>
+<p><strong>Executive Strategic Officer:</strong> [Name / Signature]</p>
+<p>Date: 2023-02-15</p>
+<p><strong>Executive Director:</strong> [Name / Signature]</p>
+<p>Date: 2023-02-15</p>
+    </div>
+  </div>
+</body>
+</html>

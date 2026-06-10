@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Controls Report</title>
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      margin: 24px;
+      color: #111;
+      background: #fff;
+    }
+    h1, h2 {
+      margin-bottom: 8px;
+    }
+    p, li {
+      line-height: 1.4;
+    }
+    .meta {
+      color: #444;
+      margin-bottom: 20px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 12px 0 28px;
+      table-layout: fixed;
+    }
+    th, td {
+      border: 1px solid #bbb;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+      word-wrap: break-word;
+    }
+    th {
+      background: #f2f2f2;
+    }
+    .card {
+      border: 1px solid #bbb;
+      padding: 12px 14px;
+      margin: 10px 0 20px;
+    }
+    .mono {
+      font-family: Consolas, "Courier New", monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>Controls Report</h1>
+  <p class="meta">Source: <span class="mono">DomainLinks</span> database from <span class="mono">dbo.ControlTypes</span>, <span class="mono">dbo.Controls</span>, and <span class="mono">dbo.DomainControls</span>.</p>
+
+  <div class="card">
+    <h2>Summary</h2>
+    <ul>
+      <li>Total control types: 6</li>
+      <li>Total controls: 9</li>
+      <li>Total domain control relationships: 9</li>
+      <li>Directive controls: 8</li>
+      <li>Preventive controls: 1</li>
+      <li>Primary domain relationships: 9</li>
+      <li>Controls tied to domain <span class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</span>: 8</li>
+      <li>Controls tied to domain <span class="mono">45F6E7A6-98F3-4019-9FE6-1B8A78EE455C</span>: 1</li>
+    </ul>
+  </div>
+
+  <h2>Joined View</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Display Order</th>
+        <th>Domain ID</th>
+        <th>Relationship Type</th>
+        <th>Is Primary</th>
+        <th>Control Type</th>
+        <th>Control Code</th>
+        <th>Display Name</th>
+        <th>Description</th>
+        <th>Control Objective</th>
+        <th>Evidence Expectation</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>10</td>
+        <td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Preventive Control</td>
+        <td class="mono">performance-management-mandatory-signed-role-approval</td>
+        <td>Mandatory Signed Role Approval</td>
+        <td>Requires all employees to have a signed Role &amp; Responsibility (R&amp;R) document on file before performance metrics are set.</td>
+        <td>Ensure performance expectations are formally documented and agreed upon prior to evaluation periods.</td>
+        <td>Signed R&amp;R documents with timestamped approval records in the HRIS repository.</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>20</td>
+        <td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Directive Control</td>
+        <td class="mono">performance-management-annual-weighting-calibration-review</td>
+        <td>Annual Weighting Calibration Review</td>
+        <td>Requires an annual review of weighting logic to ensure alignment with current organizational strategy.</td>
+        <td>To maintain relevance and accuracy of performance weights as business priorities shift.</td>
+        <td>Annual calibration meeting agenda and attendance record showing leadership review of weight allocations.</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>30</td>
+        <td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Directive Control</td>
+        <td class="mono">performance-management-development-plan-weighting-methodology-definition</td>
+        <td>Development Plan Weighting Methodology Definition</td>
+        <td>Establishes formal rules requiring specific development plan tiers to correspond with defined performance weighting ranges.</td>
+        <td>Ensures consistent application of weightings across roles based on strategic development goals rather than subjective adjustment.</td>
+        <td>Approved policy document outlining the mapping logic between development plan levels and role weighting percentages.</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>40</td>
+        <td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Directive Control</td>
+        <td class="mono">performance-management-role-weighting-deviation-justification-record</td>
+        <td>Role Weighting Deviation Justification Record</td>
+        <td>Mandates documented rationale when weighting allocation deviates from standard matrices due to development plan changes.</td>
+        <td>Prevents arbitrary weighting adjustments by requiring traceable links between development needs and performance expectations.</td>
+        <td>Audit logs containing specific justifications linked to approved development plan modifications for the role.</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>50</td>
+        <td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Directive Control</td>
+        <td class="mono">performance-management-manager-alignment-certification-on-development-weightings</td>
+        <td>Manager Alignment Certification on Development Weightings</td>
+        <td>Requires managers to certify annually that assigned role weightings align with approved individual development plans.</td>
+        <td>Promotes accountability and transparency in how career development strategies influence performance evaluation criteria.</td>
+        <td>Signed certification records from management confirming adherence between weighting structures and development plan scopes.</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>60</td>
+        <td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Directive Control</td>
+        <td class="mono">performance-management-mandatory-three-year-employee-development-plan</td>
+        <td>Mandatory Three-Year Employee Development Plan</td>
+        <td>Requires creation of a formal three-year development roadmap for all eligible employees.</td>
+        <td>Ensures long-term career planning is initiated and documented across the workforce.</td>
+        <td>Signed 3-year development plan documents accessible in HR management system.</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>70</td>
+        <td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Directive Control</td>
+        <td class="mono">performance-management-strategic-alignment-verification-on-development-milestones</td>
+        <td>Strategic Alignment Verification on Development Milestones</td>
+        <td>Requires development milestones to be explicitly mapped against organizational strategic objectives.</td>
+        <td>Aligns individual growth trajectories with corporate strategic direction.</td>
+        <td>Documented linkage matrix or system fields mapping development goals to strategic pillars.</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>80</td>
+        <td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Directive Control</td>
+        <td class="mono">performance-management-annual-development-plan-refresh-cycle</td>
+        <td>Annual Development Plan Refresh Cycle</td>
+        <td>Mandates annual review and updating of the three-year development plan to reflect current career status.</td>
+        <td>Maintains relevance of development goals within the strategic horizon over time.</td>
+        <td>System logs or signed forms demonstrating annual update approvals for employee plans.</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>10</td>
+        <td class="mono">45F6E7A6-98F3-4019-9FE6-1B8A78EE455C</td>
+        <td>Primary</td>
+        <td>1</td>
+        <td>Directive Control</td>
+        <td class="mono">executive-administration-executive-strategic-mandate-publication</td>
+        <td>Executive Strategic Mandate Publication</td>
+        <td>Requires formal publication of approved strategic mandates to ensure organizational alignment.</td>
+        <td>To enforce consistent understanding of strategic priorities across the executive tier.</td>
+        <td>Published strategic mandate documents dated and approved by Executive Sponsor, distributed via official intranet or email with read receipts.</td>
+        <td>Active</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>ControlTypes</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Code</th>
+        <th>Name</th>
+        <th>Description</th>
+        <th>Display Order</th>
+        <th>Effective Start Date</th>
+        <th>Effective End Date</th>
+        <th>Created Date</th>
+        <th>Created By</th>
+        <th>Updated Date</th>
+        <th>Updated By</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>PREVENTIVE</td><td>Preventive Control</td><td>Prevents an undesirable event from occurring.</td><td>10</td><td>2026-05-31</td><td>NULL</td><td>2026-05-31 22:02:47.188</td><td class="mono">RICHARDBASQB378\richardbasque</td><td>NULL</td><td>NULL</td></tr>
+      <tr><td>2</td><td>DETECTIVE</td><td>Detective Control</td><td>Identifies an undesirable event that has occurred.</td><td>20</td><td>2026-05-31</td><td>NULL</td><td>2026-05-31 22:02:47.188</td><td class="mono">RICHARDBASQB378\richardbasque</td><td>NULL</td><td>NULL</td></tr>
+      <tr><td>3</td><td>CORRECTIVE</td><td>Corrective Control</td><td>Restores or corrects conditions after an issue is detected.</td><td>30</td><td>2026-05-31</td><td>NULL</td><td>2026-05-31 22:02:47.188</td><td class="mono">RICHARDBASQB378\richardbasque</td><td>NULL</td><td>NULL</td></tr>
+      <tr><td>4</td><td>DIRECTIVE</td><td>Directive Control</td><td>Establishes required behaviour, expectations, or rules.</td><td>40</td><td>2026-05-31</td><td>NULL</td><td>2026-05-31 22:02:47.188</td><td class="mono">RICHARDBASQB378\richardbasque</td><td>NULL</td><td>NULL</td></tr>
+      <tr><td>5</td><td>COMPENSATING</td><td>Compensating Control</td><td>Alternative control used when the preferred control cannot be implemented.</td><td>50</td><td>2026-05-31</td><td>NULL</td><td>2026-05-31 22:02:47.188</td><td class="mono">RICHARDBASQB378\richardbasque</td><td>NULL</td><td>NULL</td></tr>
+      <tr><td>6</td><td>DETERRENT</td><td>Deterrent Control</td><td>Discourages undesirable behaviour through awareness or visibility.</td><td>60</td><td>2026-05-31</td><td>NULL</td><td>2026-05-31 22:02:47.188</td><td class="mono">RICHARDBASQB378\richardbasque</td><td>NULL</td><td>NULL</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Controls</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ControlId</th>
+        <th>ControlTypeId</th>
+        <th>ControlCode</th>
+        <th>DisplayName</th>
+        <th>Description</th>
+        <th>ControlObjective</th>
+        <th>Owner</th>
+        <th>EvidenceExpectation</th>
+        <th>Status</th>
+        <th>CreatedAtUtc</th>
+        <th>UpdatedAtUtc</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="mono">1C04BA81-BE5D-F111-BA7D-9B97B30B1200</td><td>1</td><td class="mono">performance-management-mandatory-signed-role-approval</td><td>Mandatory Signed Role Approval</td><td>Requires all employees to have a signed Role &amp; Responsibility (R&amp;R) document on file before performance metrics are set.</td><td>Ensure performance expectations are formally documented and agreed upon prior to evaluation periods.</td><td>NULL</td><td>Signed R&amp;R documents with timestamped approval records in the HRIS repository.</td><td>Active</td><td>2026-06-01 13:33:43.681</td><td>2026-06-01 13:33:43.681</td></tr>
+      <tr><td class="mono">F13F5A8A-D15D-F111-BA7D-9B97B30B1200</td><td>4</td><td class="mono">performance-management-annual-weighting-calibration-review</td><td>Annual Weighting Calibration Review</td><td>Requires an annual review of weighting logic to ensure alignment with current organizational strategy.</td><td>To maintain relevance and accuracy of performance weights as business priorities shift.</td><td>NULL</td><td>Annual calibration meeting agenda and attendance record showing leadership review of weight allocations.</td><td>Active</td><td>2026-06-01 15:49:58.590</td><td>2026-06-01 15:49:58.590</td></tr>
+      <tr><td class="mono">FB48B497-D25D-F111-BA7D-9B97B30B1200</td><td>4</td><td class="mono">executive-administration-executive-strategic-mandate-publication</td><td>Executive Strategic Mandate Publication</td><td>Requires formal publication of approved strategic mandates to ensure organizational alignment.</td><td>To enforce consistent understanding of strategic priorities across the executive tier.</td><td>NULL</td><td>Published strategic mandate documents dated and approved by Executive Sponsor, distributed via official intranet or email with read receipts.</td><td>Active</td><td>2026-06-01 15:57:30.488</td><td>2026-06-01 15:57:30.488</td></tr>
+      <tr><td class="mono">58D78803-D55D-F111-BA7D-9B97B30B1200</td><td>4</td><td class="mono">performance-management-development-plan-weighting-methodology-definition</td><td>Development Plan Weighting Methodology Definition</td><td>Establishes formal rules requiring specific development plan tiers to correspond with defined performance weighting ranges.</td><td>Ensures consistent application of weightings across roles based on strategic development goals rather than subjective adjustment.</td><td>NULL</td><td>Approved policy document outlining the mapping logic between development plan levels and role weighting percentages.</td><td>Active</td><td>2026-06-01 16:14:50.391</td><td>2026-06-01 16:14:50.391</td></tr>
+      <tr><td class="mono">19BA9537-D55D-F111-BA7D-9B97B30B1200</td><td>4</td><td class="mono">performance-management-role-weighting-deviation-justification-record</td><td>Role Weighting Deviation Justification Record</td><td>Mandates documented rationale when weighting allocation deviates from standard matrices due to development plan changes.</td><td>Prevents arbitrary weighting adjustments by requiring traceable links between development needs and performance expectations.</td><td>NULL</td><td>Audit logs containing specific justifications linked to approved development plan modifications for the role.</td><td>Active</td><td>2026-06-01 16:16:17.716</td><td>2026-06-01 16:16:17.716</td></tr>
+      <tr><td class="mono">367DBA5C-D55D-F111-BA7D-9B97B30B1200</td><td>4</td><td class="mono">performance-management-manager-alignment-certification-on-development-weightings</td><td>Manager Alignment Certification on Development Weightings</td><td>Requires managers to certify annually that assigned role weightings align with approved individual development plans.</td><td>Promotes accountability and transparency in how career development strategies influence performance evaluation criteria.</td><td>NULL</td><td>Signed certification records from management confirming adherence between weighting structures and development plan scopes.</td><td>Active</td><td>2026-06-01 16:17:20.034</td><td>2026-06-01 16:17:20.034</td></tr>
+      <tr><td class="mono">EA7B3FB2-D55D-F111-BA7D-9B97B30B1200</td><td>4</td><td class="mono">performance-management-mandatory-three-year-employee-development-plan</td><td>Mandatory Three-Year Employee Development Plan</td><td>Requires creation of a formal three-year development roadmap for all eligible employees.</td><td>Ensures long-term career planning is initiated and documented across the workforce.</td><td>NULL</td><td>Signed 3-year development plan documents accessible in HR management system.</td><td>Active</td><td>2026-06-01 16:19:43.512</td><td>2026-06-01 16:19:43.512</td></tr>
+      <tr><td class="mono">2228ABF7-D55D-F111-BA7D-9B97B30B1200</td><td>4</td><td class="mono">performance-management-strategic-alignment-verification-on-development-milestones</td><td>Strategic Alignment Verification on Development Milestones</td><td>Requires development milestones to be explicitly mapped against organizational strategic objectives.</td><td>Aligns individual growth trajectories with corporate strategic direction.</td><td>NULL</td><td>Documented linkage matrix or system fields mapping development goals to strategic pillars.</td><td>Active</td><td>2026-06-01 16:21:39.980</td><td>2026-06-01 16:21:39.980</td></tr>
+      <tr><td class="mono">7C943B09-D65D-F111-BA7D-9B97B30B1200</td><td>4</td><td class="mono">performance-management-annual-development-plan-refresh-cycle</td><td>Annual Development Plan Refresh Cycle</td><td>Mandates annual review and updating of the three-year development plan to reflect current career status.</td><td>Maintains relevance of development goals within the strategic horizon over time.</td><td>NULL</td><td>System logs or signed forms demonstrating annual update approvals for employee plans.</td><td>Active</td><td>2026-06-01 16:22:09.448</td><td>2026-06-01 16:22:09.448</td></tr>
+    </tbody>
+  </table>
+
+  <h2>DomainControls</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>DomainControlId</th>
+        <th>DomainId</th>
+        <th>ControlId</th>
+        <th>RelationshipType</th>
+        <th>IsPrimary</th>
+        <th>DisplayOrder</th>
+        <th>CreatedAtUtc</th>
+        <th>UpdatedAtUtc</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="mono">1D04BA81-BE5D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">1C04BA81-BE5D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>10</td><td>2026-06-01 13:33:43.695</td><td>2026-06-01 13:33:43.695</td></tr>
+      <tr><td class="mono">F23F5A8A-D15D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">F13F5A8A-D15D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>20</td><td>2026-06-01 15:49:58.618</td><td>2026-06-01 15:49:58.618</td></tr>
+      <tr><td class="mono">FC48B497-D25D-F111-BA7D-9B97B30B1200</td><td class="mono">45F6E7A6-98F3-4019-9FE6-1B8A78EE455C</td><td class="mono">FB48B497-D25D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>10</td><td>2026-06-01 15:57:30.504</td><td>2026-06-01 15:57:30.504</td></tr>
+      <tr><td class="mono">59D78803-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">58D78803-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>30</td><td>2026-06-01 16:14:50.408</td><td>2026-06-01 16:14:50.408</td></tr>
+      <tr><td class="mono">1ABA9537-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">19BA9537-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>40</td><td>2026-06-01 16:16:17.729</td><td>2026-06-01 16:16:17.729</td></tr>
+      <tr><td class="mono">377DBA5C-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">367DBA5C-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>50</td><td>2026-06-01 16:17:20.046</td><td>2026-06-01 16:17:20.046</td></tr>
+      <tr><td class="mono">EB7B3FB2-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">EA7B3FB2-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>60</td><td>2026-06-01 16:19:43.524</td><td>2026-06-01 16:19:43.524</td></tr>
+      <tr><td class="mono">2328ABF7-D55D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">2228ABF7-D55D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>70</td><td>2026-06-01 16:21:39.992</td><td>2026-06-01 16:21:39.992</td></tr>
+      <tr><td class="mono">7D943B09-D65D-F111-BA7D-9B97B30B1200</td><td class="mono">48D519D6-3320-4C28-BF54-6D74136C26CF</td><td class="mono">7C943B09-D65D-F111-BA7D-9B97B30B1200</td><td>Primary</td><td>1</td><td>80</td><td>2026-06-01 16:22:09.462</td><td>2026-06-01 16:22:09.462</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>

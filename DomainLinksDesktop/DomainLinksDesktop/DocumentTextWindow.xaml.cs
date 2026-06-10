@@ -1,4 +1,5 @@
 using System.Windows;
+using System.ComponentModel;
 
 namespace DomainLinksDesktop;
 
@@ -7,6 +8,17 @@ public partial class DocumentTextWindow : Window
     public DocumentTextWindow(string title, string documentName, string bodyText, bool isReadOnly)
     {
         InitializeComponent();
+        var settings = DomainLinksDesktopSettings.Load();
+        Width = settings.DocumentTextWindowWidth;
+        Height = settings.DocumentTextWindowHeight;
+        if (!double.IsNaN(settings.DocumentTextWindowLeft))
+        {
+            Left = settings.DocumentTextWindowLeft;
+        }
+        if (!double.IsNaN(settings.DocumentTextWindowTop))
+        {
+            Top = settings.DocumentTextWindowTop;
+        }
         Title = title;
         HeaderTextBlock.Text = title;
         DocumentNameTextBox.Text = documentName;
@@ -14,6 +26,7 @@ public partial class DocumentTextWindow : Window
         DocumentNameTextBox.IsReadOnly = isReadOnly;
         BodyTextBox.IsReadOnly = isReadOnly;
         SaveButton.Visibility = isReadOnly ? Visibility.Collapsed : Visibility.Visible;
+        Closing += DocumentTextWindow_OnClosing;
     }
 
     public string DocumentName => DocumentNameTextBox.Text.Trim();
@@ -39,5 +52,17 @@ public partial class DocumentTextWindow : Window
     private void CancelButton_OnClick(object sender, RoutedEventArgs e)
     {
         DialogResult = false;
+    }
+
+    private void DocumentTextWindow_OnClosing(object? sender, CancelEventArgs e)
+    {
+        var saved = DomainLinksDesktopSettings.Load() with
+        {
+            DocumentTextWindowWidth = Width,
+            DocumentTextWindowHeight = Height,
+            DocumentTextWindowLeft = Left,
+            DocumentTextWindowTop = Top,
+        };
+        saved.Save();
     }
 }

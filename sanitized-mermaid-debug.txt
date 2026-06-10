@@ -1,0 +1,104 @@
+flowchart TB
+    %% ==== Edge / User Layer ====
+    subgraph USERS["Users & Devices"]
+        direction TB
+        Endpoints[Endpoints<br/>(Windows, macOS, Linux, Mobile)]
+        EmailClients[Email Clients<br/>(Outlook, Webmail)]
+        Browsers[Web Browsers]
+        CloudApps[Cloud SaaS Apps<br/>(Teams, SharePoint, OneDrive, 3rd-party SaaS)]
+    end
+
+    %% ==== Identity & Access ====
+    AzureAD[Azure AD & Conditional Access<br/>(MFA, Device compliance)]
+
+    %% ==== Microsoft 365 E5 Native Stack ====
+    subgraph MS365["Microsoft 365 E5 Stack"]
+        direction LR
+        DefenderEP[Microsoft Defender for Endpoint]
+        DefenderO365[Microsoft Defender for Office 365]
+        MCAS[Microsoft Cloud App Security (MCAS)]
+        MIP[Microsoft Information Protection (MIP) / Sensitivity Labels]
+        SecureScore[Secure Score & Compliance Center]
+    end
+
+    %% ==== VARS Solutions ====
+    subgraph VARS["VARS Security Services"]
+        direction LR
+        CynetXDR[Cynet XDR Agent & Platform]
+        CynetCLM[Cynet CLM-XDR Alerts Connector]
+        FortiMail[FortiMail Cloud Email Security]
+        FortiWeb[FortiMail Cloud Web Browsing Security]
+        FortiCollab[FortiMail Collaboration Security<br/>(OneDrive/SharePoint/Teams) ]
+    end
+
+    %% ==== Central SIEM / SOAR ====
+    Sentinel[Microsoft Sentinel (SIEM/SOAR)]
+
+    %% ==== SOC / 24-7 Operations ====
+    SOC[VAR​S 24/7 SOC & Incident Response]
+
+    %% ==== Data Flows ====
+    %% Users to Identity
+    Endpoints --> AzureAD
+    EmailClients --> AzureAD
+    Browsers --> AzureAD
+    CloudApps --> AzureAD
+
+    %% Identity to native controls
+    AzureAD --> DefenderEP
+    AzureAD --> DefenderO365
+    AzureAD --> MCAS
+
+    %% Endpoint protection
+    Endpoints --> DefenderEP
+    Endpoints --> CynetXDR
+
+    %% Email protection
+    EmailClients --> FortiMail
+    EmailClients --> DefenderO365
+
+    %% Web browsing protection
+    Browsers --> FortiWeb
+    Browsers --> DefenderEP
+
+    %% Cloud app protection
+    CloudApps --> MCAS
+    CloudApps --> FortiCollab
+
+    %% Information protection
+    CloudApps --> MIP
+    EmailClients --> MIP
+
+    %% Log / Alert Export
+    DefenderEP --> Sentinel
+    DefenderO365 --> Sentinel
+    MCAS --> Sentinel
+    MIP --> Sentinel
+    CynetXDR --> Sentinel
+    CynetCLM --> Sentinel
+    FortiMail --> Sentinel
+    FortiWeb --> Sentinel
+    FortiCollab --> Sentinel
+
+    %% Sentinel orchestrates response
+    Sentinel --> SOC
+    SOC --> Endpoints
+    SOC --> EmailClients
+    SOC --> Browsers
+    SOC --> CloudApps
+
+    %% Management / Reporting
+    SecureScore --> SOC
+    SOC --> SecureScore
+
+    %% Styling
+    classDef cloud fill:#e0f7ff,stroke:#0078d4,stroke-width:2px;
+    classDef security fill:#fff4e5,stroke:#d97706,stroke-width:2px;
+    classDef siem fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef user fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px;
+
+
+
+
+
+

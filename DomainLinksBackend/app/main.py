@@ -1,4 +1,12 @@
 import asyncio
+import hashlib
+from collections import deque
+from datetime import datetime, timezone
+import html
+from pathlib import Path
+from threading import Lock
+import time
+import uuid
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 import httpx
@@ -6,43 +14,951 @@ from pydantic import BaseModel
 import re
 import json
 import base64
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from .config import get_settings
 from .db import ping_database
 from .document_ingest import extract_pdf_text
 from .repositories import (
     archive_document,
+    clear_policy_tables,
     create_control_from_suggestion,
     create_collection,
     create_domain,
+    create_domain_type,
     create_text_document,
     delete_collection,
     delete_domain,
     delete_content_unit,
     get_collection_delete_preview,
     get_control_suggestion_context,
+    get_default_embedding_profile,
     get_domain_delete_preview,
+    get_latest_policy_for_root_domain,
+    get_policy_presentation_data,
+    get_retrieval_profile,
     get_recent_context_units,
     get_domain_assist_context,
     has_user_chat_backup_files,
     list_collection_documents,
     list_document_chunks,
+    list_embedding_status,
     list_collections,
     list_controls_for_branch,
+    list_controls_report_rows,
+    list_policies,
     list_control_types,
     list_domains,
     list_domain_orientations,
     list_domain_types,
+    reorder_domain_types,
     reorder_root_domains,
     list_retrieval_profiles,
     list_user_chat_backup_files,
     mark_user_chat_backup_files_restored,
+    move_domain,
+    search_similar_content_units,
+    list_unembedded_content_units,
+    upsert_content_unit_embeddings,
+    upsert_policy_draft,
     upsert_app_user,
     upsert_user_chat_backup_file,
     update_collection,
     update_domain,
 )
+
+
+_llm_trace_lock = Lock()
+_llm_traces: deque[dict[str, object]] = deque(maxlen=200)
+
+
+def _append_llm_trace(
+    *,
+    trace_type: str,
+    model: str,
+    prompt: str,
+    response_text: str = "",
+    success: bool = True,
+    error: str | None = None,
+    duration_seconds: float | None = None,
+    label: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    with _llm_trace_lock:
+        trace_record = {
+            "traceId": str(uuid.uuid4()),
+            "createdAtUtc": datetime.now(timezone.utc).isoformat(),
+            "traceType": trace_type,
+            "label": (label or "ollama").strip(),
+            "model": model,
+            "prompt": prompt,
+            "responseText": response_text,
+            "success": success,
+            "error": error or "",
+            "durationSeconds": round(duration_seconds or 0.0, 3),
+            "promptChars": len(prompt),
+            "responseChars": len(response_text),
+        }
+        if metadata:
+            trace_record["metadata"] = metadata
+        _llm_traces.appendleft(trace_record)
+
+
+def _list_llm_traces() -> list[dict[str, object]]:
+    with _llm_trace_lock:
+        return [dict(item) for item in _llm_traces]
+
+
+def _build_llm_trace_html(base_url: str, traces: list[dict[str, object]]) -> str:
+    def metric_card(label: str, value_html: str, definition: str) -> str:
+        escaped_definition = html.escape(definition)
+        return (
+            f'<div class="metric-card" role="button" tabindex="0" data-help-title="{html.escape(label)}" data-help-definition="{escaped_definition}">'
+            f'<strong>{html.escape(label)}</strong>'
+            f'<span>{value_html}</span>'
+            f"</div>"
+        )
+
+    cards: list[str] = []
+    for trace in traces:
+        metadata = trace.get("metadata") if isinstance(trace.get("metadata"), dict) else {}
+        status_label = "Success" if trace.get("success") else "Error"
+        status_class = "ok" if trace.get("success") else "error"
+        error_html = (
+            f"<div class='error-block'><strong>Error</strong><pre>{html.escape(str(trace.get('error') or ''))}</pre></div>"
+            if trace.get("error")
+            else ""
+        )
+        context_html = ""
+        if metadata:
+            used_collection_codes = metadata.get("usedCollectionCodes") or []
+            used_collection_text = ", ".join(str(code) for code in used_collection_codes) if isinstance(used_collection_codes, list) else ""
+            retrieved_sources = metadata.get("retrievedSourceNames") or []
+            retrieved_sources_text = ", ".join(str(name) for name in retrieved_sources) if isinstance(retrieved_sources, list) else ""
+            context_html = f"""
+              <section>
+                <h3>Context</h3>
+                <div class="meta-grid">
+                  {metric_card("Retrieval mode", html.escape(str(metadata.get("retrievalMode") or "FullContext")), "How the backend assembled context before sending the prompt to the model.")}
+                  {metric_card("Profile", html.escape(str(metadata.get("retrievalProfileCode") or "--")), "The retrieval profile that supplied retrieval defaults like top-k and whole-document behavior.")}
+                  {metric_card("Context units", html.escape(str(metadata.get("contextUnitCount") or 0)), "How many retrieved chunks or units were inserted into the context block.")}
+                  {metric_card("Context size", html.escape(str(metadata.get("contextChars") or 0)) + " chars", "The character length of the retrieved context block only, not the whole compiled prompt.")}
+                  {metric_card("User prompt", html.escape(str(metadata.get("userPromptChars") or 0)) + " chars / " + html.escape(str(metadata.get("userPromptTokensEstimated") or 0)) + " est.", "The size of the current user prompt by characters and estimated tokens.")}
+                  {metric_card("Context tokens", html.escape(str(metadata.get("contextTokensActual") or 0)) + " actual / " + html.escape(str(metadata.get("contextTokensEstimated") or 0)) + " est.", "Token footprint of the retrieved context block. 'Actual' comes from chunk token counts; 'est.' is a fallback approximation.")}
+                </div>
+                <div class="meta-grid">
+                  {metric_card("Conversation history", html.escape(str(metadata.get("historyMessageCount") or 0)) + " messages / " + html.escape(str(metadata.get("historyChars") or 0)) + " chars / " + html.escape(str(metadata.get("historyTokensEstimated") or 0)) + " est.", "The chat history included in the compiled prompt before the current response was generated.")}
+                  {metric_card("Compiled prompt", html.escape(str(trace.get("promptChars") or 0)) + " chars / " + html.escape(str(metadata.get("compiledPromptTokensEstimated") or 0)) + " est.", "The full prompt sent to the model, including instructions, history, user prompt, and retrieved context.")}
+                  {metric_card("Collections", html.escape(used_collection_text or "--"), "The short-memory and long-term collection codes that were eligible to contribute context.")}
+                  {metric_card("Retrieved sources", html.escape(retrieved_sources_text or "--"), "Distinct source documents that contributed retrieved context to this prompt.")}
+                  {metric_card("Fallback", html.escape(str(metadata.get("fallbackReason") or "--")), "Why the backend fell back or issued a warning, such as no vector hits or missing embeddings.")}
+                  {metric_card("Measure", "LLM context is primarily measured in tokens.", "The model's hard budget is tokens, not characters or document count.")}
+                </div>
+              </section>
+            """
+        response_html = html.escape(str(trace.get("responseText") or ""))
+        prompt_html = html.escape(str(trace.get("prompt") or ""))
+        cards.append(
+            f"""
+            <article class="trace-card">
+              <header class="trace-header">
+                <div>
+                  <h2>{html.escape(str(trace.get("label") or "ollama"))}</h2>
+                  <div class="meta">{html.escape(str(trace.get("createdAtUtc") or ""))}</div>
+                </div>
+                <span class="status {status_class}">{status_label}</span>
+              </header>
+              <div class="meta-grid">
+                {metric_card("Model", html.escape(str(trace.get("model") or "")), "The model name reported by the backend or Ollama for this request.")}
+                {metric_card("Type", html.escape(str(trace.get("traceType") or "")), "Whether this was a normal one-shot generation or a streaming response.")}
+                {metric_card("Duration", html.escape(str(trace.get("durationSeconds") or 0)) + "s", "Elapsed backend time for the model call, measured in seconds.")}
+                {metric_card("Sizes", html.escape(str(trace.get("promptChars") or 0)) + " / " + html.escape(str(trace.get("responseChars") or 0)) + " chars", "Character sizes for the compiled prompt and the final model response.")}
+              </div>
+              {context_html}
+              {error_html}
+              <section>
+                <h3>Prompt</h3>
+                <pre>{prompt_html}</pre>
+              </section>
+              <section>
+                <h3>Response</h3>
+                <pre>{response_html}</pre>
+              </section>
+            </article>
+            """
+        )
+
+    body = "\n".join(cards) if cards else "<p class='empty'>No LLM traces captured yet.</p>"
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM Traces</title>
+  <style>
+    body {{
+      margin: 0;
+      background: #f7f7f7;
+      color: #111;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }}
+    .page {{
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px;
+    }}
+    .page-header {{
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 20px;
+    }}
+    .page-header h1 {{
+      margin: 0;
+      font-size: 28px;
+    }}
+    .page-header p {{
+      margin: 6px 0 0;
+      color: #444;
+    }}
+    .actions a {{
+      color: #111;
+      text-decoration: none;
+      border: 1px solid #bbb;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: #fff;
+      margin-left: 8px;
+    }}
+    .trace-list {{
+      display: grid;
+      gap: 18px;
+    }}
+    .trace-card {{
+      background: #fff;
+      border: 1px solid #d4d4d4;
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }}
+    .trace-header {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 12px;
+    }}
+    .trace-header h2 {{
+      margin: 0;
+      font-size: 18px;
+    }}
+    .meta, .meta-grid span {{
+      color: #555;
+      font-size: 13px;
+    }}
+    .meta-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }}
+    .meta-grid div {{
+      background: #fafafa;
+      border: 1px solid #e2e2e2;
+      border-radius: 6px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }}
+    .metric-card {{
+      cursor: pointer;
+      transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }}
+    .metric-card:hover,
+    .metric-card:focus {{
+      border-color: #99adc2;
+      box-shadow: 0 0 0 2px rgba(24, 52, 74, 0.08);
+      background: #f5f8fb;
+      outline: none;
+    }}
+    .status {{
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid #bbb;
+    }}
+    .status.ok {{
+      background: #f2f2f2;
+    }}
+    .status.error {{
+      background: #fff0f0;
+      border-color: #c99;
+    }}
+    h3 {{
+      margin: 14px 0 8px;
+      font-size: 15px;
+    }}
+    pre {{
+      margin: 0;
+      padding: 12px;
+      background: #fafafa;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }}
+    .error-block {{
+      margin-bottom: 12px;
+    }}
+    .empty {{
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 18px;
+    }}
+    .help-overlay {{
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.35);
+      padding: 20px;
+      z-index: 1000;
+    }}
+    .help-overlay.is-open {{
+      display: flex;
+    }}
+    .help-dialog {{
+      width: min(540px, 100%);
+      background: #fff;
+      border: 1px solid #d6d6d6;
+      border-radius: 10px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
+      padding: 18px;
+    }}
+    .help-dialog h2 {{
+      margin: 0 0 10px;
+      font-size: 20px;
+    }}
+    .help-dialog p {{
+      margin: 0;
+      color: #333;
+      line-height: 1.5;
+    }}
+    .help-dialog-actions {{
+      margin-top: 16px;
+      display: flex;
+      justify-content: flex-end;
+    }}
+    .help-dialog button {{
+      height: 34px;
+      padding: 0 14px;
+      border: 1px solid #bbb;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      font: inherit;
+    }}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <div>
+        <h1>LLM Traces</h1>
+        <p>Live local backend trace of prompts and responses sent through the Ollama wrapper.</p>
+      </div>
+      <div class="actions">
+        <a href="{html.escape(base_url.rstrip('/') + '/debug/llm-traces.json')}">JSON</a>
+        <a href="{html.escape(base_url.rstrip('/') + '/debug/llm-traces')}">Refresh</a>
+      </div>
+    </header>
+    <section class="trace-list">
+      {body}
+    </section>
+  </main>
+  <div id="help-overlay" class="help-overlay" aria-hidden="true">
+    <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <h2 id="help-title">Metric help</h2>
+      <p id="help-body"></p>
+      <div class="help-dialog-actions">
+        <button id="help-close-button" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {{
+      const overlay = document.getElementById('help-overlay');
+      const title = document.getElementById('help-title');
+      const body = document.getElementById('help-body');
+      const closeButton = document.getElementById('help-close-button');
+      if (!overlay || !title || !body || !closeButton) {{
+        return;
+      }}
+
+      function openHelp(helpTitle, helpDefinition) {{
+        title.textContent = helpTitle || 'Metric help';
+        body.textContent = helpDefinition || '';
+        overlay.classList.add('is-open');
+        overlay.setAttribute('aria-hidden', 'false');
+        closeButton.focus();
+      }}
+
+      function closeHelp() {{
+        overlay.classList.remove('is-open');
+        overlay.setAttribute('aria-hidden', 'true');
+      }}
+
+      document.querySelectorAll('.metric-card').forEach((card) => {{
+        card.addEventListener('click', () => {{
+          openHelp(card.getAttribute('data-help-title'), card.getAttribute('data-help-definition'));
+        }});
+        card.addEventListener('keydown', (event) => {{
+          if (event.key === 'Enter' || event.key === ' ') {{
+            event.preventDefault();
+            openHelp(card.getAttribute('data-help-title'), card.getAttribute('data-help-definition'));
+          }}
+        }});
+      }});
+
+      overlay.addEventListener('click', (event) => {{
+        if (event.target === overlay) {{
+          closeHelp();
+        }}
+      }});
+      closeButton.addEventListener('click', closeHelp);
+      document.addEventListener('keydown', (event) => {{
+        if (event.key === 'Escape' && overlay.classList.contains('is-open')) {{
+          closeHelp();
+        }}
+      }});
+    }})();
+  </script>
+</body>
+</html>"""
+
+
+def _resolve_backend_base_url(settings) -> str:
+    host = (getattr(settings, "api_host", None) or "127.0.0.1").strip()
+    port = int(getattr(settings, "api_port", 5056) or 5056)
+    return f"http://{host}:{port}"
+
+
+def _estimate_token_count(text: str) -> int:
+    stripped = (text or "").strip()
+    if not stripped:
+        return 0
+    return max(1, len(stripped) // 4)
+
+
+def _build_embedding_debug_html(base_url: str, status_payload: dict[str, object]) -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Embedding Status</title>
+  <style>
+    body {{
+      margin: 0;
+      background: #f7f7f7;
+      color: #111;
+      font-family: "Segoe UI", Arial, sans-serif;
+    }}
+    .page {{
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }}
+    .summary, .collection-table, .actions {{
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 18px;
+    }}
+    .stats {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }}
+    .stat {{
+      border: 1px solid #e4e4e4;
+      background: #fafafa;
+      border-radius: 6px;
+      padding: 10px;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+    }}
+    th, td {{
+      text-align: left;
+      padding: 8px;
+      border-bottom: 1px solid #ececec;
+      font-size: 13px;
+    }}
+    input, button {{
+      height: 32px;
+      padding: 4px 10px;
+      font: inherit;
+    }}
+    .actions-row {{
+      display: flex;
+      gap: 10px;
+      align-items: end;
+      flex-wrap: wrap;
+    }}
+    .status {{
+      margin-top: 10px;
+      color: #444;
+      white-space: pre-wrap;
+    }}
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="summary">
+      <h1>Embedding Status</h1>
+      <p>Monitor chunk embeddings and run small manual backfills.</p>
+      <div class="stats">
+        <div class="stat"><strong>Profile</strong><div>{html.escape(str(status_payload.get("profileCode") or ""))}</div></div>
+        <div class="stat"><strong>Model</strong><div>{html.escape(str(status_payload.get("modelName") or ""))}</div></div>
+        <div class="stat"><strong>Total chunks</strong><div id="total-count">{html.escape(str(status_payload.get("totalContentUnitCount") or 0))}</div></div>
+        <div class="stat"><strong>Embedded</strong><div id="embedded-count">{html.escape(str(status_payload.get("embeddedContentUnitCount") or 0))}</div></div>
+        <div class="stat"><strong>Unembedded</strong><div id="unembedded-count">{html.escape(str(status_payload.get("unembeddedContentUnitCount") or 0))}</div></div>
+        <div class="stat"><strong>Total tokens</strong><div id="total-tokens">{html.escape(str(status_payload.get("totalTokenCount") or 0))}</div></div>
+        <div class="stat"><strong>Embedded tokens</strong><div id="embedded-tokens">{html.escape(str(status_payload.get("embeddedTokenCount") or 0))}</div></div>
+        <div class="stat"><strong>Unembedded tokens</strong><div id="unembedded-tokens">{html.escape(str(status_payload.get("unembeddedTokenCount") or 0))}</div></div>
+      </div>
+    </section>
+    <section class="actions">
+      <h2>Backfill</h2>
+      <div class="actions-row">
+        <label>Collection code<br><input id="collection-code" type="text" placeholder="optional"></label>
+        <label>Limit<br><input id="backfill-limit" type="number" value="25" min="1" max="2000"></label>
+        <button id="backfill-button" type="button">Run Backfill</button>
+        <button id="refresh-button" type="button">Refresh</button>
+      </div>
+      <div id="backfill-status" class="status"></div>
+    </section>
+    <section class="collection-table">
+      <h2>Collections</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Collection</th>
+            <th>Total</th>
+            <th>Embedded</th>
+            <th>Unembedded</th>
+            <th>Total tokens</th>
+            <th>Embedded tokens</th>
+            <th>Unembedded tokens</th>
+          </tr>
+        </thead>
+        <tbody id="collections-body"></tbody>
+      </table>
+    </section>
+  </main>
+  <script>
+    const baseUrl = {json.dumps(base_url.rstrip('/'))};
+    const initialStatus = {json.dumps(status_payload)};
+
+    function renderStatus(payload) {{
+      document.getElementById('total-count').textContent = payload.totalContentUnitCount ?? 0;
+      document.getElementById('embedded-count').textContent = payload.embeddedContentUnitCount ?? 0;
+      document.getElementById('unembedded-count').textContent = payload.unembeddedContentUnitCount ?? 0;
+      document.getElementById('total-tokens').textContent = payload.totalTokenCount ?? 0;
+      document.getElementById('embedded-tokens').textContent = payload.embeddedTokenCount ?? 0;
+      document.getElementById('unembedded-tokens').textContent = payload.unembeddedTokenCount ?? 0;
+      const tbody = document.getElementById('collections-body');
+      tbody.innerHTML = '';
+      for (const collection of payload.collections || []) {{
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${{collection.CollectionDisplayName || collection.CollectionCode || ''}}<br><small>${{collection.CollectionCode || ''}}</small></td>
+          <td>${{collection.TotalContentUnitCount || 0}}</td>
+          <td>${{collection.EmbeddedContentUnitCount || 0}}</td>
+          <td>${{collection.UnembeddedContentUnitCount || 0}}</td>
+          <td>${{collection.TotalTokenCount || 0}}</td>
+          <td>${{collection.EmbeddedTokenCount || 0}}</td>
+          <td>${{collection.UnembeddedTokenCount || 0}}</td>
+        `;
+        tbody.appendChild(row);
+      }}
+    }}
+
+    async function refreshStatus() {{
+      const response = await fetch(baseUrl + '/debug/embedding-status');
+      const payload = await response.json();
+      renderStatus(payload);
+      return payload;
+    }}
+
+    async function runBackfill() {{
+      const collectionCode = document.getElementById('collection-code').value.trim();
+      const limit = document.getElementById('backfill-limit').value || '25';
+      const status = document.getElementById('backfill-status');
+      status.textContent = 'Running backfill...';
+      const url = new URL(baseUrl + '/debug/embeddings/backfill');
+      url.searchParams.set('limit', limit);
+      if (collectionCode) {{
+        url.searchParams.set('collectionCode', collectionCode);
+      }}
+      const response = await fetch(url, {{ method: 'POST' }});
+      const payload = await response.json();
+      status.textContent = JSON.stringify(payload, null, 2);
+      await refreshStatus();
+    }}
+
+    document.getElementById('backfill-button').addEventListener('click', () => {{
+      runBackfill().catch(error => {{
+        document.getElementById('backfill-status').textContent = String(error);
+      }});
+    }});
+    document.getElementById('refresh-button').addEventListener('click', () => {{
+      refreshStatus().catch(error => {{
+        document.getElementById('backfill-status').textContent = String(error);
+      }});
+    }});
+    renderStatus(initialStatus);
+  </script>
+</body>
+</html>"""
+
+
+def _normalize_retrieval_mode(value: str | None) -> str:
+    normalized = (value or "").strip().lower().replace(" ", "").replace("-", "")
+    if normalized in {"vectorrag", "vector"}:
+        return "VectorRag"
+    if normalized == "hybrid":
+        return "Hybrid"
+    return "FullContext"
+
+
+def _vector_to_sql_literal(values: list[float]) -> str:
+    return "[" + ",".join(f"{float(value):.7e}" for value in values) + "]"
+
+
+def _build_embedding_hash(text: str) -> bytes:
+    return hashlib.sha256(text.encode("utf-8")).digest()
+
+
+def _request_ollama_embeddings(settings, inputs: list[str], model: str | None = None) -> list[list[float]]:
+    selected_model = (model or settings.ollama_embed_model).strip()
+    if not inputs:
+        return []
+
+    try:
+        response = httpx.post(
+            f"{settings.ollama_base_url}/api/embed",
+            json={
+                "model": selected_model,
+                "input": inputs,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        embeddings = payload.get("embeddings")
+        if isinstance(embeddings, list) and len(embeddings) == len(inputs):
+            return [[float(value) for value in vector] for vector in embeddings]
+    except Exception:
+        pass
+
+    vectors: list[list[float]] = []
+    for text in inputs:
+        response = httpx.post(
+            f"{settings.ollama_base_url}/api/embeddings",
+            json={
+                "model": selected_model,
+                "prompt": text,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        vector = payload.get("embedding")
+        if not isinstance(vector, list):
+            raise ValueError("Ollama embeddings response did not include an embedding vector.")
+        vectors.append([float(value) for value in vector])
+    return vectors
+
+
+def _trim_context_units(
+    rows: list[dict[str, object]],
+    *,
+    max_context_tokens: int | None,
+) -> list[dict[str, object]]:
+    if not max_context_tokens or max_context_tokens <= 0:
+        return rows
+
+    trimmed: list[dict[str, object]] = []
+    running_total = 0
+    for row in rows:
+        token_count = int(row.get("TokenCount") or 0)
+        if token_count <= 0:
+            token_count = _estimate_token_count(str(row.get("BodyText") or ""))
+        if trimmed and running_total + token_count > max_context_tokens:
+            break
+        trimmed.append(row)
+        running_total += token_count
+    return trimmed
+
+
+def _build_source_items(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {
+            "collectionCode": row.get("CollectionCode"),
+            "collectionDisplayName": row.get("CollectionDisplayName") or row.get("CollectionCode"),
+            "sourceName": row.get("SourceName") or "unknown",
+            "contentUnitId": row.get("ContentUnitId"),
+            "tokenCount": int(row.get("TokenCount") or 0),
+        }
+        for row in rows
+    ]
+
+
+def _build_context_lines(rows: list[dict[str, object]]) -> list[str]:
+    lines: list[str] = []
+    for row in rows:
+        collection_display = row.get("CollectionDisplayName") or row.get("CollectionCode")
+        source_name = row.get("SourceName") or "unknown"
+        body = row.get("BodyText") or ""
+        lines.append(f"[{collection_display} | {source_name}] {body}")
+    return lines
+
+
+def _build_chat_trace_metadata(
+    *,
+    retrieval_mode: str,
+    collection_codes: list[str],
+    context_units: list[dict[str, object]],
+    context_text: str,
+    prompt: str,
+    history_lines: list[str],
+    history_text: str,
+    compiled_prompt: str,
+    retrieval_profile: dict[str, object] | None,
+    fallback_reason: str | None = None,
+) -> dict[str, object]:
+    actual_context_tokens = sum(
+        int(row.get("TokenCount") or 0) if int(row.get("TokenCount") or 0) > 0 else _estimate_token_count(str(row.get("BodyText") or ""))
+        for row in context_units
+    )
+    return {
+        "retrievalMode": retrieval_mode,
+        "usedCollectionCodes": collection_codes,
+        "contextUnitCount": len(context_units),
+        "contextChars": len(context_text),
+        "contextTokensEstimated": _estimate_token_count(context_text),
+        "contextTokensActual": actual_context_tokens,
+        "userPromptChars": len(prompt),
+        "userPromptTokensEstimated": _estimate_token_count(prompt),
+        "historyMessageCount": len(history_lines),
+        "historyChars": len(history_text),
+        "historyTokensEstimated": _estimate_token_count(history_text),
+        "compiledPromptTokensEstimated": _estimate_token_count(compiled_prompt),
+        "retrievalProfileCode": str(retrieval_profile.get("ProfileCode") or "") if retrieval_profile else "",
+        "retrievedChunkIds": [str(row.get("ContentUnitId") or "") for row in context_units if row.get("ContentUnitId")],
+        "retrievedSourceNames": sorted(
+            {
+                str(row.get("SourceName") or "")
+                for row in context_units
+                if str(row.get("SourceName") or "").strip()
+            }
+        ),
+        "fallbackOccurred": bool(fallback_reason),
+        "fallbackReason": fallback_reason or "",
+    }
+
+
+def _expand_whole_documents(
+    settings,
+    rows: list[dict[str, object]],
+    *,
+    include_chunks: bool,
+) -> list[dict[str, object]]:
+    if not rows:
+        return rows
+
+    doc_metadata = {
+        str(row.get("DocumentId") or ""): row
+        for row in rows
+        if str(row.get("DocumentId") or "").strip()
+    }
+    expanded_rows: list[dict[str, object]] = rows[:] if include_chunks else []
+    seen_ids = {
+        str(row.get("ContentUnitId") or "")
+        for row in expanded_rows
+        if str(row.get("ContentUnitId") or "").strip()
+    }
+
+    for document_id, metadata in doc_metadata.items():
+        for chunk in list_document_chunks(settings, document_id):
+            content_unit_id = str(chunk.get("ContentUnitId") or "")
+            if content_unit_id and content_unit_id in seen_ids:
+                continue
+            expanded_rows.append(
+                {
+                    "CollectionCode": metadata.get("CollectionCode"),
+                    "CollectionDisplayName": metadata.get("CollectionDisplayName"),
+                    "DocumentId": document_id,
+                    "SourceName": metadata.get("SourceName"),
+                    "ContentUnitId": chunk.get("ContentUnitId"),
+                    "UnitType": chunk.get("UnitType"),
+                    "UnitOrdinal": chunk.get("UnitOrdinal"),
+                    "TokenCount": chunk.get("TokenCount"),
+                    "BodyText": chunk.get("BodyText"),
+                    "Distance": metadata.get("Distance"),
+                }
+            )
+            if content_unit_id:
+                seen_ids.add(content_unit_id)
+    return expanded_rows
+
+
+def _dedupe_context_units(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    deduped: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for row in rows:
+        content_unit_id = str(row.get("ContentUnitId") or "")
+        if content_unit_id and content_unit_id in seen_ids:
+            continue
+        deduped.append(row)
+        if content_unit_id:
+            seen_ids.add(content_unit_id)
+    return deduped
+
+
+def _ensure_embeddings_for_content(
+    settings,
+    *,
+    document_id: str | None = None,
+    collection_codes: list[str] | None = None,
+    limit: int = 200,
+) -> dict[str, object]:
+    embedding_profile = get_default_embedding_profile(settings)
+    vector_dimension = int(embedding_profile.get("VectorDimension") or 768)
+    units = list_unembedded_content_units(
+        settings,
+        embedding_profile_id=str(embedding_profile["EmbeddingProfileId"]),
+        limit=limit,
+        collection_codes=collection_codes,
+        document_id=document_id,
+    )
+    if not units:
+        return {
+            "profileCode": str(embedding_profile.get("ProfileCode") or ""),
+            "processedCount": 0,
+            "insertedCount": 0,
+            "updatedCount": 0,
+        }
+
+    inputs = [str(unit.get("BodyText") or "") for unit in units]
+    embeddings = _request_ollama_embeddings(settings, inputs, model=str(embedding_profile.get("ModelName") or ""))
+    if len(embeddings) != len(units):
+        raise ValueError("Embedding generation did not return the expected number of vectors.")
+
+    upsert_result = upsert_content_unit_embeddings(
+        settings,
+        embedding_profile_id=str(embedding_profile["EmbeddingProfileId"]),
+        vector_dimension=vector_dimension,
+        embeddings=[
+            {
+                "contentUnitId": str(unit.get("ContentUnitId") or ""),
+                "vectorText": _vector_to_sql_literal(vector),
+                "embeddingHash": _build_embedding_hash(str(unit.get("BodyText") or "")),
+            }
+            for unit, vector in zip(units, embeddings, strict=False)
+        ],
+    )
+    return {
+        "profileCode": str(embedding_profile.get("ProfileCode") or ""),
+        "processedCount": len(units),
+        **upsert_result,
+    }
+
+
+def _retrieve_context_for_chat(settings, request: AskRequest) -> tuple[list[dict[str, object]], dict[str, object]]:
+    collection_codes = [request.shortMemoryCollectionCode, *request.longTermCollectionCodes]
+    retrieval_mode = _normalize_retrieval_mode(request.retrievalMode)
+    fallback_reason: str | None = None
+    retrieval_profile: dict[str, object] | None = None
+
+    if retrieval_mode == "FullContext":
+        rows = get_recent_context_units(settings, collection_codes)
+        return rows, {
+            "retrievalMode": retrieval_mode,
+            "collectionCodes": collection_codes,
+            "retrievalProfile": retrieval_profile,
+            "fallbackReason": fallback_reason,
+        }
+
+    profile_code = "domain-vector-default" if retrieval_mode == "VectorRag" else "project-hybrid-default"
+    retrieval_profile = get_retrieval_profile(settings, profile_code)
+    if not retrieval_profile:
+        fallback_reason = f"Retrieval profile '{profile_code}' is not configured."
+        if retrieval_mode == "Hybrid":
+            rows = get_recent_context_units(settings, collection_codes)
+        else:
+            rows = []
+        return rows, {
+            "retrievalMode": retrieval_mode,
+            "collectionCodes": collection_codes,
+            "retrievalProfile": retrieval_profile,
+            "fallbackReason": fallback_reason,
+        }
+
+    try:
+        embedding_profile = get_default_embedding_profile(settings)
+        vector_dimension = int(embedding_profile.get("VectorDimension") or 768)
+        query_vector = _request_ollama_embeddings(settings, [request.prompt], model=str(embedding_profile.get("ModelName") or ""))[0]
+        vector_rows = search_similar_content_units(
+            settings,
+            embedding_profile_id=str(embedding_profile["EmbeddingProfileId"]),
+            vector_dimension=vector_dimension,
+            query_vector_text=_vector_to_sql_literal(query_vector),
+            collection_codes=collection_codes,
+            top_k=int(retrieval_profile.get("TopK") or 8),
+        )
+    except Exception as exc:
+        vector_rows = []
+        fallback_reason = str(exc)
+
+    if not vector_rows and not fallback_reason:
+        fallback_reason = "Vector retrieval found no embedded chunks within the selected collections."
+
+    include_chunks = bool(retrieval_profile.get("IncludeChunks"))
+    include_whole_docs = bool(retrieval_profile.get("IncludeWholeDocs"))
+    max_context_tokens = int(retrieval_profile.get("MaxContextTokens") or 0)
+    if include_whole_docs:
+        vector_rows = _expand_whole_documents(settings, vector_rows, include_chunks=include_chunks)
+    elif not include_chunks:
+        vector_rows = []
+
+    if retrieval_mode == "VectorRag":
+        final_rows = _trim_context_units(_dedupe_context_units(vector_rows), max_context_tokens=max_context_tokens)
+    else:
+        recent_rows = get_recent_context_units(settings, collection_codes)
+        combined_rows = _dedupe_context_units([*vector_rows, *recent_rows])
+        final_rows = _trim_context_units(combined_rows, max_context_tokens=max_context_tokens)
+        if not vector_rows and not fallback_reason:
+            fallback_reason = "Hybrid retrieval used recency context because no vector matches were available."
+
+    return final_rows, {
+        "retrievalMode": retrieval_mode,
+        "collectionCodes": collection_codes,
+        "retrievalProfile": retrieval_profile,
+        "fallbackReason": fallback_reason,
+    }
 
 
 class CreateDomainRequest(BaseModel):
@@ -51,6 +967,11 @@ class CreateDomainRequest(BaseModel):
     domainOrientationId: int | None = None
     domainParentId: str | None = None
     displayName: str
+    description: str | None = None
+
+
+class CreateDomainTypeRequest(BaseModel):
+    name: str
     description: str | None = None
 
 
@@ -78,12 +999,23 @@ class UpdateDomainRequest(BaseModel):
     description: str | None = None
     domainTypeId: int | None = None
     domainOrientationId: int | None = None
+    parentDomainId: str | None = None
+
+
+class MoveDomainRequest(BaseModel):
+    domainCode: str
+    newParentDomainCode: str | None = None
+    newDomainTypeId: int | None = None
 
 
 class ReorderDomainSiblingsRequest(BaseModel):
     parentDomainId: str | None = None
     orientationCode: str | None = None
     orderedDomainCodes: list[str]
+
+
+class ReorderDomainTypesRequest(BaseModel):
+    orderedTypeIds: list[int]
 
 
 class DomainAssistRequest(BaseModel):
@@ -137,8 +1069,20 @@ class AskRequest(BaseModel):
     prompt: str
     shortMemoryCollectionCode: str
     longTermCollectionCodes: list[str] = []
+    retrievalMode: str = "FullContext"
     model: str | None = None
     history: list[dict[str, str]] = []
+
+
+class ContextPreviewResponse(BaseModel):
+    retrievalMode: str
+    retrievalWarning: str = ""
+    usedCollectionCodes: list[str] = []
+    contextUnitCount: int = 0
+    contextTokenCount: int = 0
+    contextCharCount: int = 0
+    sourceCount: int = 0
+    sources: list[dict[str, object]] = []
 
 
 class ChatBackupUserRequest(BaseModel):
@@ -164,36 +1108,216 @@ class ChatBackupFileUpsertRequest(ChatBackupUserRequest):
     isDeleted: bool = False
 
 
-def _generate_with_ollama(settings, prompt: str, model: str | None = None) -> dict[str, object]:
-    response = httpx.post(
-        f"{settings.ollama_base_url}/api/generate",
-        json={
-            "model": model or settings.ollama_chat_model,
-            "prompt": prompt,
-            "stream": False,
-        },
-        timeout=120,
-    )
-    response.raise_for_status()
-    return response.json()
+class PolicyDraftContentRequest(BaseModel):
+    domainCode: str
+    templatePath: str = "Policy/Policy-Template-1.01.md"
+    model: str | None = None
+    includedControlCodes: list[str] | None = None
 
 
-async def _stream_with_ollama(settings, prompt: str, model: str | None = None):
-    async with httpx.AsyncClient(timeout=120) as client:
-        async with client.stream(
-            "POST",
+class PolicyDraftLineRetryRequest(BaseModel):
+    domainCode: str
+    sectionKey: str
+    currentText: str
+    templatePath: str = "Policy/Policy-Template-1.01.md"
+    model: str | None = None
+    controlCode: str | None = None
+    includedControlCodes: list[str] | None = None
+
+
+class ControlGroupingRequest(BaseModel):
+    domainCode: str
+    model: str | None = None
+    controlCodes: list[str] | None = None
+
+
+class PolicyDraftStatementItem(BaseModel):
+    statementText: str
+    displayOrder: int = 0
+    reviewStatus: str = "Pending"
+
+
+class PolicyDraftControlStatementItem(BaseModel):
+    controlCode: str
+    statementText: str
+    displayOrder: int = 0
+    reviewStatus: str = "Pending"
+
+
+class SavePolicyDraftRequest(BaseModel):
+    rootDomainCode: str
+    policyCode: str
+    policyTitle: str
+    versionText: str
+    status: str
+    templatePath: str | None = None
+    sourceModelName: str | None = None
+    objectives: list[PolicyDraftStatementItem] = []
+    principles: list[PolicyDraftStatementItem] = []
+    accountability: list[PolicyDraftStatementItem] = []
+    transparency: list[PolicyDraftStatementItem] = []
+    strategy: list[PolicyDraftStatementItem] = []
+    consequences: list[PolicyDraftStatementItem] = []
+    controlStatements: list[PolicyDraftControlStatementItem] = []
+
+
+def _build_saved_policy_draft_payload(policy_data: dict[str, object]) -> dict[str, object]:
+    policy = policy_data.get("policy") or {}
+    control_groups: dict[str, dict[str, object]] = {}
+    for row in policy_data.get("controlStatements") or []:
+        control_code = str(row.get("ControlCode") or "")
+        if control_code not in control_groups:
+            control_groups[control_code] = {
+                "controlCode": control_code,
+                "controlName": str(row.get("ControlName") or ""),
+                "domainCode": str(policy.get("RootDomainCode") or ""),
+                "domainDisplayName": str(policy.get("RootDomainName") or ""),
+                "controlTypeCode": str(row.get("ControlTypeCode") or ""),
+                "controlTypeName": str(row.get("ControlTypeName") or ""),
+                "policyStatements": [],
+            }
+
+        control_groups[control_code]["policyStatements"].append(
+            {
+                "statementText": str(row.get("StatementText") or ""),
+                "displayOrder": int(row.get("DisplayOrder") or 0),
+                "reviewStatus": str(row.get("ReviewStatus") or "Pending"),
+            }
+        )
+
+    def _section_items(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+        return [
+            {
+                "statementText": str(row.get("StatementText") or ""),
+                "displayOrder": int(row.get("DisplayOrder") or 0),
+                "reviewStatus": str(row.get("ReviewStatus") or "Pending"),
+            }
+            for row in rows
+        ]
+
+    return {
+        "policyId": str(policy.get("PolicyId") or ""),
+        "policyCode": str(policy.get("PolicyCode") or ""),
+        "documentTitle": str(policy.get("PolicyTitle") or ""),
+        "versionText": str(policy.get("VersionText") or ""),
+        "status": str(policy.get("Status") or ""),
+        "rootDomainName": str(policy.get("RootDomainName") or ""),
+        "rootDomainCode": str(policy.get("RootDomainCode") or ""),
+        "rootBreadcrumb": "",
+        "modelName": str(policy.get("SourceModelName") or ""),
+        "objectives": _section_items(policy_data.get("objectives") or []),
+        "principles": _section_items(policy_data.get("principles") or []),
+        "accountability": _section_items(policy_data.get("accountability") or []),
+        "transparency": _section_items(policy_data.get("transparency") or []),
+        "strategy": _section_items(policy_data.get("strategy") or []),
+        "controls": list(control_groups.values()),
+        "consequences": _section_items(policy_data.get("consequences") or []),
+    }
+
+
+def _generate_with_ollama(
+    settings,
+    prompt: str,
+    model: str | None = None,
+    trace_label: str | None = None,
+    trace_metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    selected_model = model or settings.ollama_chat_model
+    started_at = time.perf_counter()
+    try:
+        response = httpx.post(
             f"{settings.ollama_base_url}/api/generate",
             json={
-                "model": model or settings.ollama_chat_model,
+                "model": selected_model,
                 "prompt": prompt,
-                "stream": True,
+                "stream": False,
             },
-        ) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
-                yield json.loads(line)
+            timeout=120,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        _append_llm_trace(
+            trace_type="generate",
+            model=str(payload.get("model") or selected_model),
+            prompt=prompt,
+            response_text=str(payload.get("response") or ""),
+            success=True,
+            duration_seconds=time.perf_counter() - started_at,
+            label=trace_label,
+            metadata=trace_metadata,
+        )
+        return payload
+    except Exception as exc:
+        _append_llm_trace(
+            trace_type="generate",
+            model=selected_model,
+            prompt=prompt,
+            response_text="",
+            success=False,
+            error=str(exc),
+            duration_seconds=time.perf_counter() - started_at,
+            label=trace_label,
+            metadata=trace_metadata,
+        )
+        raise
+
+
+async def _stream_with_ollama(
+    settings,
+    prompt: str,
+    model: str | None = None,
+    trace_label: str | None = None,
+    trace_metadata: dict[str, object] | None = None,
+):
+    selected_model = model or settings.ollama_chat_model
+    started_at = time.perf_counter()
+    response_parts: list[str] = []
+    final_model = selected_model
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream(
+                "POST",
+                f"{settings.ollama_base_url}/api/generate",
+                json={
+                    "model": selected_model,
+                    "prompt": prompt,
+                    "stream": True,
+                },
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    payload = json.loads(line)
+                    chunk_text = str(payload.get("response") or "")
+                    if chunk_text:
+                        response_parts.append(chunk_text)
+                    final_model = str(payload.get("model") or final_model)
+                    yield payload
+
+        _append_llm_trace(
+            trace_type="stream",
+            model=final_model,
+            prompt=prompt,
+            response_text="".join(response_parts),
+            success=True,
+            duration_seconds=time.perf_counter() - started_at,
+            label=trace_label,
+            metadata=trace_metadata,
+        )
+    except Exception as exc:
+        _append_llm_trace(
+            trace_type="stream",
+            model=final_model,
+            prompt=prompt,
+            response_text="".join(response_parts),
+            success=False,
+            error=str(exc),
+            duration_seconds=time.perf_counter() - started_at,
+            label=trace_label,
+            metadata=trace_metadata,
+        )
+        raise
 
 
 def _normalize_title(raw: str) -> str:
@@ -223,7 +1347,12 @@ def _generate_title(settings, prompt: str, answer: str) -> str:
         f"Answer: {answer}\n"
     )
     try:
-        title_payload = _generate_with_ollama(settings, title_prompt, model=settings.ollama_title_model)
+        title_payload = _generate_with_ollama(
+            settings,
+            title_prompt,
+            model=settings.ollama_title_model,
+            trace_label="chat.title",
+        )
         title = _normalize_title(title_payload.get("response", ""))
         return title if title != "Untitled response" else _fallback_title(prompt)
     except Exception:
@@ -238,7 +1367,12 @@ def _generate_prompt_title(settings, prompt: str) -> str:
         f"Prompt: {prompt}\n"
     )
     try:
-        title_payload = _generate_with_ollama(settings, title_prompt, model=settings.ollama_title_model)
+        title_payload = _generate_with_ollama(
+            settings,
+            title_prompt,
+            model=settings.ollama_title_model,
+            trace_label="chat.title",
+        )
         title = _normalize_title(title_payload.get("response", ""))
         return title if title != "Untitled response" else _fallback_title(prompt)
     except Exception:
@@ -358,7 +1492,7 @@ def _build_child_domain_suggestion_prompt_parts(
         "- Do not include any explanation before or after the JSON.\n"
         '- "displayName" must be a concise business domain title.\n'
         '- "description" must explain what belongs in the domain and what underlying information, activities, responsibilities, or controls it covers.\n'
-        '- "domainType" must be exactly one of: EXECUTIVE, CORPORATE, SERVICE.\n'
+        '- "domainType" must be exactly one of the allowed domain type codes shown below.\n'
         "- Do not repeat or closely duplicate an existing child domain.\n"
         "- Make the suggestion fit naturally under the selected parent domain.\n"
         "- Prefer clarity and specificity over broad or generic wording."
@@ -464,6 +1598,46 @@ def _build_control_suggestion_prompt(
     return system_prompt, user_prompt
 
 
+def _build_ai_control_grouping_prompt(
+    *,
+    root_domain: dict[str, object],
+    branch_controls: list[dict[str, object]],
+) -> str:
+    control_lines = [
+        (
+            f"- code={item.get('ControlCode') or ''}; "
+            f"name={item.get('DisplayName') or ''}; "
+            f"type={item.get('ControlTypeName') or ''}; "
+            f"domain={item.get('DomainDisplayName') or ''}; "
+            f"description={item.get('Description') or ''}"
+        )
+        for item in branch_controls
+    ]
+    return (
+        "You are organizing policy controls into practical working groups for a human editor.\n\n"
+        "Return only JSON in this exact structure:\n"
+        "{\n"
+        '  "groups": [\n'
+        "    {\n"
+        '      "label": "Short Group Name",\n'
+        '      "controlCodes": ["code-1", "code-2"]\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "Rules:\n"
+        "- Return only JSON.\n"
+        "- Do not include markdown fences.\n"
+        "- Every control code must appear in exactly one group.\n"
+        "- Use 2 to 6 groups when possible.\n"
+        "- Group by real working similarity, not alphabetically.\n"
+        "- Group labels must be short, clear, and business-friendly.\n"
+        "- Do not invent control codes.\n"
+        "- Do not omit controls.\n\n"
+        f"Root domain: {root_domain.get('DisplayName') or ''} [{root_domain.get('DomainCode') or ''}]\n\n"
+        f"Controls:\n{chr(10).join(control_lines) if control_lines else 'None'}\n"
+    )
+
+
 def _build_control_suggestion_prompt_text(
     context: dict[str, object],
     control_types: list[dict[str, object]],
@@ -541,6 +1715,927 @@ def _build_control_insert_preview(
         "CROSS JOIN @CreatedControl c\n"
         "WHERE d.DomainCode = @DomainCode;"
     )
+
+
+def _build_controls_report_html(report_rows: list[dict[str, object]]) -> str:
+    domain_groups: dict[str, dict[str, object]] = {}
+    directive_count = 0
+    preventive_count = 0
+
+    for row in report_rows:
+        domain_id = str(row.get("DomainId") or "")
+        group = domain_groups.setdefault(
+            domain_id,
+            {
+                "domainDisplayName": row.get("DomainDisplayName") or "",
+                "domainCode": row.get("DomainCode") or "",
+                "domainDescription": row.get("DomainDescription") or "",
+                "domainId": domain_id,
+                "breadcrumb": " / ".join(
+                    [
+                        part
+                        for part in [
+                            row.get("GrandparentDisplayName"),
+                            row.get("ParentDisplayName"),
+                            row.get("DomainDisplayName"),
+                        ]
+                        if part
+                    ]
+                ) or str(row.get("DomainDisplayName") or ""),
+                "controls": [],
+            },
+        )
+        group["controls"].append(row)
+
+        control_type = str(row.get("ControlTypeName") or "")
+        if control_type == "Directive Control":
+            directive_count += 1
+        elif control_type == "Preventive Control":
+            preventive_count += 1
+
+    ordered_groups = sorted(
+        domain_groups.values(),
+        key=lambda item: (
+            str(item.get("breadcrumb") or ""),
+            str(item.get("domainDisplayName") or ""),
+        ),
+    )
+
+    def esc(value: object) -> str:
+        return html.escape("" if value is None else str(value))
+
+    domain_sections: list[str] = []
+    for group in ordered_groups:
+        control_cards: list[str] = []
+        for row in group["controls"]:
+            control_cards.append(
+                f"""
+      <div class="control-card">
+        <div class="control-top">
+          <div>
+            <h4>{esc(row.get("DomainControlDisplayOrder"))}. {esc(row.get("DisplayName"))}</h4>
+            <div class="control-meta">
+              <span class="pill">{esc(row.get("ControlTypeName"))}</span>
+              <span class="pill">{esc(row.get("RelationshipType"))}</span>
+              <span class="pill">{esc(row.get("Status"))}</span>
+            </div>
+            <p class="mono">{esc(row.get("ControlCode"))}</p>
+          </div>
+        </div>
+        <p><span class="label">Description:</span> {esc(row.get("Description"))}</p>
+        <div class="grid-2">
+          <div><span class="label">Objective:</span> {esc(row.get("ControlObjective"))}</div>
+          <div><span class="label">Evidence:</span> {esc(row.get("EvidenceExpectation"))}</div>
+        </div>
+      </div>"""
+            )
+
+        domain_sections.append(
+            f"""
+  <div class="domain-card">
+    <div class="domain-header">
+      <div>
+        <h3>{esc(group.get("domainDisplayName"))}</h3>
+        <div class="breadcrumb">{esc(group.get("breadcrumb"))}</div>
+        <p class="muted">{esc(group.get("domainDescription"))}</p>
+        <p><span class="label">Domain Code:</span> <span class="mono">{esc(group.get("domainCode"))}</span></p>
+        <p><span class="label">Domain ID:</span> <span class="mono">{esc(group.get("domainId"))}</span></p>
+      </div>
+      <div class="pill">{len(group["controls"])} linked controls</div>
+    </div>
+
+    <div class="control-list">
+      {''.join(control_cards)}
+    </div>
+  </div>"""
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Smart Controls Report</title>
+  <style>
+    :root {{
+      --text: #111;
+      --muted: #5a5a5a;
+      --line: #d7d7d7;
+      --panel: #f7f7f7;
+      --panel-2: #fcfcfc;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 24px;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      background: #fff;
+      line-height: 1.4;
+    }}
+    h1, h2, h3, h4, p {{ margin: 0 0 10px; }}
+    h1 {{ font-size: 28px; }}
+    h2 {{ font-size: 20px; margin-top: 28px; }}
+    h3 {{ font-size: 17px; margin-top: 20px; }}
+    h4 {{ font-size: 14px; margin-top: 14px; }}
+    .meta, .muted {{ color: var(--muted); }}
+    .summary {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 18px 0 28px;
+    }}
+    .summary-card, .domain-card, .control-card {{
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+    }}
+    .summary-card {{
+      padding: 12px 14px;
+      min-height: 92px;
+    }}
+    .summary-number {{
+      display: block;
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }}
+    .domain-card {{
+      padding: 16px;
+      margin: 0 0 22px;
+      background: var(--panel);
+    }}
+    .domain-header {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }}
+    .pill {{
+      display: inline-block;
+      border: 1px solid #bdbdbd;
+      padding: 2px 8px;
+      font-size: 12px;
+      background: #fff;
+      white-space: nowrap;
+    }}
+    .breadcrumb {{
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: -4px;
+      margin-bottom: 8px;
+    }}
+    .control-list {{
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }}
+    .control-card {{
+      padding: 14px;
+      background: #fff;
+    }}
+    .control-top {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }}
+    .control-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 8px 0 10px;
+    }}
+    .label {{
+      font-weight: bold;
+    }}
+    .mono {{
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+    }}
+    .grid-2 {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 10px;
+    }}
+    @media (max-width: 900px) {{
+      .grid-2 {{ grid-template-columns: 1fr; }}
+      .domain-header, .control-top {{ display: block; }}
+    }}
+  </style>
+</head>
+<body>
+  <h1>Smart Controls Report</h1>
+  <p class="meta">Live view from <span class="mono">DomainLinks</span>, grouped by domain and ordered by domain control display order.</p>
+
+  <div class="summary">
+    <div class="summary-card">
+      <span class="summary-number">{len(ordered_groups)}</span>
+      <div>Domains with controls</div>
+    </div>
+    <div class="summary-card">
+      <span class="summary-number">{len(report_rows)}</span>
+      <div>Total controls linked to domains</div>
+    </div>
+    <div class="summary-card">
+      <span class="summary-number">{directive_count}</span>
+      <div>Directive controls</div>
+    </div>
+    <div class="summary-card">
+      <span class="summary-number">{preventive_count}</span>
+      <div>Preventive controls</div>
+    </div>
+  </div>
+
+  <h2>Domain Groups</h2>
+  <p class="meta">Each domain shows its hierarchy as a breadcrumb and then its underlying controls.</p>
+  {''.join(domain_sections)}
+</body>
+</html>"""
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_repo_relative_path(repo_relative_path: str) -> Path:
+    candidate = (_repo_root() / repo_relative_path).resolve()
+    repo_root = _repo_root().resolve()
+    if repo_root not in candidate.parents and candidate != repo_root:
+        raise ValueError("Template path must stay within the repository.")
+    if not candidate.is_file():
+        raise ValueError(f"Template file was not found: {repo_relative_path}")
+    return candidate
+
+
+def _domain_breadcrumb(domain: dict[str, object], all_domains: list[dict[str, object]]) -> str:
+    lookup = {
+        str(item.get("DomainId") or ""): item
+        for item in all_domains
+        if item.get("DomainId")
+    }
+    parts = [str(domain.get("DisplayName") or domain.get("DomainCode") or "")]
+    parent_id = str(domain.get("DomainParentId") or "").strip()
+    while parent_id and parent_id in lookup:
+        parent = lookup[parent_id]
+        parts.insert(0, str(parent.get("DisplayName") or parent.get("DomainCode") or ""))
+        parent_id = str(parent.get("DomainParentId") or "").strip()
+    return " / ".join(part for part in parts if part)
+
+
+def _build_policy_generation_prompt(
+    template_text: str,
+    root_domain: dict[str, object],
+    branch_domains: list[dict[str, object]],
+    existing_controls: list[dict[str, object]],
+    all_domains: list[dict[str, object]],
+) -> tuple[str, str]:
+    root_breadcrumb = _domain_breadcrumb(root_domain, all_domains)
+    branch_lines = [
+        f"- {_domain_breadcrumb(domain, all_domains)} | code={domain.get('DomainCode')} | type={domain.get('DomainType') or 'Unknown'} | description={domain.get('Description') or ''}"
+        for domain in branch_domains
+    ]
+    control_lines = [
+        f"- domain={item.get('DomainDisplayName')} | type={item.get('ControlTypeName')} ({item.get('ControlTypeCode')}) | name={item.get('DisplayName')} | code={item.get('ControlCode')} | description={item.get('Description') or ''} | objective={item.get('ControlObjective') or ''} | evidence={item.get('EvidenceExpectation') or ''}"
+        for item in existing_controls
+    ]
+
+    system_prompt = (
+        "You are drafting an internal policy document from structured local organizational data.\n\n"
+        "Rules:\n"
+        "- Use only the supplied domain, child-domain, and control data.\n"
+        "- Do not invent external laws, standards, frameworks, departments, committees, or references.\n"
+        "- The output is a completed policy draft, not a template.\n"
+        "- Preserve the template structure and headings exactly as given.\n"
+        "- Replace the template title with a final policy title based on the selected root domain.\n"
+        "- Never leave the words 'Template' or 'Project Management' in the document title unless the selected root domain actually requires them.\n"
+        "- Use the title '<Root Domain Display Name> Policy'.\n"
+        "- Replace template instructions and placeholders with policy-ready drafting.\n"
+        "- If a factual detail is missing, keep a clear placeholder instead of inventing it.\n"
+        "- Derive principles, policy statements, consequences, definitions, forms, and references from the supplied branch data only.\n"
+        "- Write 1 to 2 objective statements.\n"
+        "- Write 3 to 4 principles.\n"
+        "- A principle is a guiding belief, value, or decision standard. A principle should describe what guides choices or behavior, not what someone is required to do.\n"
+        "- Do not write principles as commands, enforcement statements, or wording such as 'shall', 'must', or 'will'.\n"
+        "- Write exactly 1 statement for Accountability and 1 statement for Transparency.\n"
+        "- Write 1 to 2 strategy statements.\n"
+        "- Under section 3.0 Policy, create a control-specific subsection for every control item if needed to fit full coverage cleanly.\n"
+        "- Use the control display name as the subsection heading under 3.0 Policy.\n"
+        "- Write 1 to 3 policy statements per control item.\n"
+        "- Never leave out a control.\n"
+        "- Keep controls in display order.\n"
+        "- Write 1 to 2 consequence statements.\n"
+        "- Use markdown only.\n"
+        "- Return only the completed policy draft."
+    )
+    user_prompt = (
+        f"Template:\n{template_text}\n\n"
+        f"Root domain:\n"
+        f"- name={root_domain.get('DisplayName')}\n"
+        f"- code={root_domain.get('DomainCode')}\n"
+        f"- breadcrumb={root_breadcrumb}\n"
+        f"- description={root_domain.get('Description') or ''}\n\n"
+        f"Branch domains:\n{chr(10).join(branch_lines) if branch_lines else 'None'}\n\n"
+        f"Branch controls:\n{chr(10).join(control_lines) if control_lines else 'None'}\n\n"
+        "Draft a complete policy using this material.\n"
+        "Coverage requirements:\n"
+        "- Every listed control must appear in the policy section.\n"
+        "- Section 3.0 must include one control subsection per listed control when the template does not provide enough direct numbered policy lines.\n"
+        "- For a branch with 10 controls, the policy output must clearly cover all 10 controls.\n"
+        "- Keep objectives, principles, accountability/transparency, strategy, and consequences within the required ranges.\n"
+        "- If the template numbering offers more lines than the required ranges, consolidate the drafting while preserving the template headings."
+    )
+    return system_prompt, user_prompt
+
+
+def _build_policy_content_prompt(
+    template_text: str,
+    root_domain: dict[str, object],
+    branch_domains: list[dict[str, object]],
+    branch_controls: list[dict[str, object]],
+    all_domains: list[dict[str, object]],
+) -> tuple[str, str]:
+    root_breadcrumb = _domain_breadcrumb(root_domain, all_domains)
+    branch_lines = [
+        f"- {_domain_breadcrumb(domain, all_domains)} | code={domain.get('DomainCode')} | type={domain.get('DomainType') or 'Unknown'} | description={domain.get('Description') or ''}"
+        for domain in branch_domains
+    ]
+    control_lines = [
+        f"- controlCode={item.get('ControlCode')} | controlName={item.get('DisplayName')} | domain={item.get('DomainDisplayName')} ({item.get('DomainCode')}) | type={item.get('ControlTypeName')} ({item.get('ControlTypeCode')}) | description={item.get('Description') or ''} | objective={item.get('ControlObjective') or ''} | evidence={item.get('EvidenceExpectation') or ''}"
+        for item in branch_controls
+    ]
+
+    system_prompt = (
+        "You are drafting the content sections for an internal policy from structured local organizational data.\n\n"
+        "Return only valid JSON. Do not wrap it in markdown fences.\n"
+        "Use only the supplied domain, branch, control, and template data.\n"
+        "Do not invent external laws, standards, frameworks, departments, committees, or references.\n"
+        "Treat the template as structural guidance only.\n"
+        "Write concise, policy-ready sentences.\n"
+        "Section definitions:\n"
+        "- Objectives: short outcome statements describing what this policy is meant to achieve.\n"
+        "- Principles: enduring beliefs, values, or decision standards that guide judgment and behavior. Principles are not requirements, directives, or enforcement statements.\n"
+        "- Accountability: a policy statement that assigns ownership or responsibility.\n"
+        "- Transparency: a policy statement that expresses visibility, disclosure, traceability, or openness expectations.\n"
+        "- Strategy: a policy statement describing the organization's practical approach for carrying out this policy area.\n"
+        "- Control policy statements: policy requirements aligned to each control's purpose.\n"
+        "- Consequences: policy statements describing outcomes of noncompliance or failure.\n"
+        "Principles must read like beliefs or standards, not commands.\n"
+        "Do not use directive wording such as 'shall', 'must', 'will', 'required', or 'responsible for' in principles.\n"
+        "Do not write principles as obligations, prohibitions, procedures, or tasks.\n"
+        "A principle should sound like something that guides choices, such as a value, orientation, or standard of judgment.\n"
+        "Accountability and transparency are policy statements, so directive wording is allowed there.\n"
+        "Strategy should reinforce how the organization approaches the domain in practical terms.\n"
+        "Every control must appear exactly once in the controls array.\n"
+        "Keep controls in the supplied order.\n"
+        "Write 1 to 2 objective statements.\n"
+        "Write 3 to 4 principles.\n"
+        "Write exactly 1 accountability statement.\n"
+        "Write exactly 1 transparency statement.\n"
+        "Write 1 to 2 strategy statements.\n"
+        "Write 1 to 3 policy statements per control.\n"
+        "Write 1 to 2 consequence statements.\n"
+        "Use this exact JSON shape:\n"
+        "{\n"
+        '  "documentTitle": "Root Domain Policy",\n'
+        '  "objectives": ["..."],\n'
+        '  "principles": ["..."],\n'
+        '  "accountability": ["..."],\n'
+        '  "transparency": ["..."],\n'
+        '  "strategy": ["..."],\n'
+        '  "controls": [\n'
+        "    {\n"
+        '      "controlCode": "control-code",\n'
+        '      "policyStatements": ["..."]\n'
+        "    }\n"
+        "  ],\n"
+        '  "consequences": ["..."]\n'
+        "}\n"
+    )
+    user_prompt = (
+        f"Template:\n{template_text}\n\n"
+        f"Root domain:\n"
+        f"- name={root_domain.get('DisplayName')}\n"
+        f"- code={root_domain.get('DomainCode')}\n"
+        f"- breadcrumb={root_breadcrumb}\n"
+        f"- description={root_domain.get('Description') or ''}\n\n"
+        f"Branch domains:\n{chr(10).join(branch_lines) if branch_lines else 'None'}\n\n"
+        f"Branch controls in required order:\n{chr(10).join(control_lines) if control_lines else 'None'}\n\n"
+        "Draft only the policy content sections in the requested JSON format."
+    )
+    return system_prompt, user_prompt
+
+
+def _build_policy_line_retry_prompt(
+    *,
+    template_text: str,
+    root_domain: dict[str, object],
+    branch_domains: list[dict[str, object]],
+    branch_controls: list[dict[str, object]],
+    all_domains: list[dict[str, object]],
+    section_key: str,
+    current_text: str,
+    control_code: str | None,
+) -> str:
+    root_breadcrumb = _domain_breadcrumb(root_domain, all_domains)
+    target_control = next(
+        (
+            item
+            for item in branch_controls
+            if str(item.get("ControlCode") or "").strip().lower() == str(control_code or "").strip().lower()
+        ),
+        None,
+    )
+
+    section_rules = {
+        "objective": "Write one concise objective statement for the policy. Keep it outcome-oriented.",
+        "principle": "Write one concise principle. A principle is a guiding belief, value, or decision standard. It is not a requirement or instruction. Do not use 'shall', 'must', 'will', 'required', or 'responsible for'.",
+        "accountability": "Write one concise accountability statement. It should clearly express ownership or responsibility.",
+        "transparency": "Write one concise transparency statement. It should clearly express visibility, disclosure, or traceability expectations.",
+        "strategy": "Write one concise strategy statement. It should reinforce the organizational approach for this domain.",
+        "consequence": "Write one concise consequence statement tied to noncompliance or failure to follow the policy.",
+        "control-policy": "Write one concise policy statement for the specified control. It should align to the control's purpose and sound like policy language.",
+    }
+    rule_text = section_rules.get(section_key, "Write one concise replacement policy line.")
+
+    branch_lines = [
+        f"- {_domain_breadcrumb(domain, all_domains)} | code={domain.get('DomainCode')} | type={domain.get('DomainType') or 'Unknown'}"
+        for domain in branch_domains
+    ]
+    control_context = "None"
+    if target_control:
+        control_context = (
+            f"controlCode={target_control.get('ControlCode')} | "
+            f"controlName={target_control.get('DisplayName')} | "
+            f"domain={target_control.get('DomainDisplayName')} ({target_control.get('DomainCode')}) | "
+            f"type={target_control.get('ControlTypeName')} ({target_control.get('ControlTypeCode')}) | "
+            f"description={target_control.get('Description') or ''} | "
+            f"objective={target_control.get('ControlObjective') or ''} | "
+            f"evidence={target_control.get('EvidenceExpectation') or ''}"
+        )
+
+    return (
+        "You are revising one line in an internal policy draft.\n\n"
+        "Return only the replacement line as plain text.\n"
+        "Do not number it. Do not add bullets. Do not add quotation marks.\n"
+        "Use only the supplied local domain, branch, control, and template context.\n"
+        "Do not invent external laws, standards, frameworks, departments, or references.\n\n"
+        "Section definitions:\n"
+        "- Objectives: short outcome statements describing what this policy is meant to achieve.\n"
+        "- Principles: enduring beliefs, values, or decision standards that guide judgment and behavior. Principles are not requirements, directives, or enforcement statements.\n"
+        "- Accountability: a policy statement that assigns ownership or responsibility.\n"
+        "- Transparency: a policy statement that expresses visibility, disclosure, traceability, or openness expectations.\n"
+        "- Strategy: a policy statement describing the organization's practical approach for carrying out this policy area.\n"
+        "- Control policy statements: policy requirements aligned to each control's purpose.\n"
+        "- Consequences: policy statements describing outcomes of noncompliance or failure.\n"
+        "Principles must read like beliefs or standards, not commands.\n"
+        "Do not use directive wording such as 'shall', 'must', 'will', 'required', or 'responsible for' in principles.\n"
+        "Do not write principles as obligations, prohibitions, procedures, or tasks.\n"
+        "A principle should sound like something that guides choices, such as a value, orientation, or standard of judgment.\n\n"
+        f"Rule for this line:\n{rule_text}\n\n"
+        f"Template reference:\n{template_text}\n\n"
+        f"Root domain:\n"
+        f"- name={root_domain.get('DisplayName')}\n"
+        f"- code={root_domain.get('DomainCode')}\n"
+        f"- breadcrumb={root_breadcrumb}\n"
+        f"- description={root_domain.get('Description') or ''}\n\n"
+        f"Branch domains:\n{chr(10).join(branch_lines) if branch_lines else 'None'}\n\n"
+        f"Target control context:\n{control_context}\n\n"
+        f"Current line to replace:\n{current_text.strip()}\n\n"
+        "Write a fresh replacement line now."
+    )
+
+
+def _coerce_text_list(value: object, *, minimum: int = 0, maximum: int | None = None) -> list[str]:
+    items: list[str] = []
+    if isinstance(value, list):
+        for item in value:
+            text = str(item or "").strip()
+            if text:
+                items.append(text)
+    if maximum is not None:
+        items = items[:maximum]
+    if minimum > 0 and len(items) < minimum:
+        items.extend(["[Draft needed]"] * (minimum - len(items)))
+    return items
+
+
+def _normalize_policy_content_draft(
+    parsed: dict[str, object],
+    root_domain: dict[str, object],
+    branch_controls: list[dict[str, object]],
+    model_name: str,
+    all_domains: list[dict[str, object]],
+) -> dict[str, object]:
+    controls_by_code = {
+        str(item.get("ControlCode") or "").strip().lower(): item
+        for item in branch_controls
+        if item.get("ControlCode")
+    }
+    parsed_controls = parsed.get("controls")
+    parsed_control_lookup: dict[str, dict[str, object]] = {}
+    if isinstance(parsed_controls, list):
+        for item in parsed_controls:
+            if not isinstance(item, dict):
+                continue
+            control_code = str(item.get("controlCode") or "").strip().lower()
+            if control_code:
+                parsed_control_lookup[control_code] = item
+
+    normalized_controls: list[dict[str, object]] = []
+    for control in branch_controls:
+        control_code = str(control.get("ControlCode") or "").strip()
+        parsed_item = parsed_control_lookup.get(control_code.lower(), {})
+        normalized_controls.append(
+            {
+                "controlCode": control_code,
+                "controlName": str(control.get("DisplayName") or ""),
+                "domainCode": str(control.get("DomainCode") or ""),
+                "domainDisplayName": str(control.get("DomainDisplayName") or ""),
+                "controlTypeCode": str(control.get("ControlTypeCode") or ""),
+                "controlTypeName": str(control.get("ControlTypeName") or ""),
+                "policyStatements": _coerce_text_list(parsed_item.get("policyStatements"), minimum=1, maximum=3),
+            }
+        )
+
+    root_domain_name = str(root_domain.get("DisplayName") or root_domain.get("DomainCode") or "Policy")
+    return {
+        "documentTitle": str(parsed.get("documentTitle") or f"{root_domain_name} Policy").strip() or f"{root_domain_name} Policy",
+        "rootDomainName": root_domain_name,
+        "rootDomainCode": str(root_domain.get("DomainCode") or ""),
+        "rootBreadcrumb": _domain_breadcrumb(root_domain, all_domains),
+        "modelName": model_name,
+        "objectives": _coerce_text_list(parsed.get("objectives"), minimum=1, maximum=2),
+        "principles": _coerce_text_list(parsed.get("principles"), minimum=3, maximum=4),
+        "accountability": _coerce_text_list(parsed.get("accountability"), minimum=1, maximum=1),
+        "transparency": _coerce_text_list(parsed.get("transparency"), minimum=1, maximum=1),
+        "strategy": _coerce_text_list(parsed.get("strategy"), minimum=1, maximum=2),
+        "controls": normalized_controls,
+        "consequences": _coerce_text_list(parsed.get("consequences"), minimum=1, maximum=2),
+    }
+
+
+def _finalize_policy_markdown(root_domain_name: str, markdown_text: str) -> str:
+    final_title = f"# {root_domain_name} Policy"
+    lines = markdown_text.splitlines()
+    if not lines:
+        return final_title
+
+    for index, line in enumerate(lines):
+        if line.strip().startswith("# "):
+            lines[index] = final_title
+            return "\n".join(lines)
+
+    return final_title + "\n\n" + markdown_text
+
+
+def _render_simple_markdown_to_html(markdown_text: str) -> str:
+    lines = markdown_text.splitlines()
+    html_parts: list[str] = []
+    in_list = False
+
+    def close_list() -> None:
+        nonlocal in_list
+        if in_list:
+            html_parts.append("</ul>")
+            in_list = False
+
+    def inline_format(text: str) -> str:
+        escaped = html.escape(text)
+        escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+        return escaped
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            close_list()
+            continue
+        if stripped.startswith("# "):
+            close_list()
+            html_parts.append(f"<h1>{inline_format(stripped[2:])}</h1>")
+            continue
+        if stripped.startswith("## "):
+            close_list()
+            html_parts.append(f"<h2>{inline_format(stripped[3:])}</h2>")
+            continue
+        if stripped.startswith("### "):
+            close_list()
+            html_parts.append(f"<h3>{inline_format(stripped[4:])}</h3>")
+            continue
+        if stripped.startswith("- "):
+            if not in_list:
+                html_parts.append("<ul>")
+                in_list = True
+            html_parts.append(f"<li>{inline_format(stripped[2:])}</li>")
+            continue
+        close_list()
+        html_parts.append(f"<p>{inline_format(stripped)}</p>")
+
+    close_list()
+    return "\n".join(html_parts)
+
+
+def _build_policy_browser_html(
+    *,
+    domain_code: str,
+    template_path: str,
+    model_name: str,
+    body_html: str,
+    root_domain_name: str,
+    domain_options: list[dict[str, str]],
+) -> str:
+    domain_options_html = "\n".join(
+        f'<option value="{html.escape(item["value"])}"{" selected" if item["selected"] else ""}>{html.escape(item["label"])}</option>'
+        for item in domain_options
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Policy Draft Preview</title>
+  <style>
+    body {{ font-family: Arial, Helvetica, sans-serif; margin: 24px; color: #111; background: #fff; }}
+    .meta {{ color: #5a5a5a; margin-bottom: 18px; }}
+    .shell {{ max-width: 1100px; margin: 0 auto; }}
+    .toolbar {{ border: 1px solid #d7d7d7; background: #f7f7f7; padding: 14px; margin-bottom: 20px; }}
+    label {{ display: block; font-size: 12px; font-weight: bold; margin-bottom: 4px; }}
+    input {{ width: 100%; padding: 8px; border: 1px solid #c8c8c8; }}
+    .row {{ display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; }}
+    button {{ padding: 9px 14px; border: 1px solid #18344a; background: #18344a; color: #fff; cursor: pointer; }}
+    .doc {{ border: 1px solid #ddd; background: #fff; padding: 32px; }}
+    h1 {{ font-size: 28px; }}
+    h2 {{ font-size: 20px; margin-top: 24px; }}
+    h3 {{ font-size: 16px; margin-top: 18px; }}
+    p, li {{ line-height: 1.5; }}
+    ul {{ margin-top: 0; }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1>Policy Draft Preview</h1>
+    <p class="meta">Generated from the selected root domain, its branch domains, and its controls using the local model.</p>
+    <form class="toolbar" method="get" action="/reports/policy-draft">
+      <div class="row">
+        <div>
+          <label for="domainCode">Domain Code</label>
+          <select id="domainCode" name="domainCode" style="width: 100%; padding: 8px; border: 1px solid #c8c8c8;">
+            {domain_options_html}
+          </select>
+        </div>
+        <div>
+          <label for="templatePath">Template Path</label>
+          <input id="templatePath" name="templatePath" value="{html.escape(template_path)}" />
+        </div>
+        <div>
+          <label for="model">Model</label>
+          <input id="model" name="model" value="{html.escape(model_name)}" />
+        </div>
+        <div>
+          <button type="submit">Generate</button>
+        </div>
+      </div>
+    </form>
+    <div class="meta">Direct draft URL: <code>/reports/policy-draft?domainCode={html.escape(domain_code)}</code></div>
+    <div class="meta">Root domain: <strong>{html.escape(root_domain_name)}</strong></div>
+    <div class="meta">Model used: <strong>{html.escape(model_name)}</strong></div>
+    <div class="doc">
+      {body_html}
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+def _render_policy_line_items(rows: list[dict[str, object]]) -> str:
+    if not rows:
+        return "<p class=\"empty\">No content saved for this section.</p>"
+
+    items: list[str] = []
+    for row in rows:
+        statement_text = html.escape(str(row.get("StatementText") or ""))
+        review_status = str(row.get("ReviewStatus") or "").strip()
+        meta_html = f"<div class=\"line-meta\">{html.escape(review_status)}</div>" if review_status else ""
+        items.append(f"<li>{meta_html}<div>{statement_text}</div></li>")
+    return f"<ol>{''.join(items)}</ol>"
+
+
+def _build_saved_policy_html(policy_data: dict[str, object]) -> str:
+    policy = policy_data.get("policy") or {}
+    policy_title = html.escape(str(policy.get("PolicyTitle") or "Policy"))
+    root_domain_name = html.escape(str(policy.get("RootDomainName") or ""))
+    root_domain_code = html.escape(str(policy.get("RootDomainCode") or ""))
+    policy_code = html.escape(str(policy.get("PolicyCode") or ""))
+    version_text = html.escape(str(policy.get("VersionText") or ""))
+    status = html.escape(str(policy.get("Status") or ""))
+    template_name = html.escape(str(policy.get("TemplateName") or "") or "None")
+    model_name = html.escape(str(policy.get("SourceModelName") or "") or "Unknown")
+    updated_at = html.escape(str(policy.get("UpdatedAtUtc") or policy.get("CreatedAtUtc") or ""))
+
+    control_rows = policy_data.get("controlStatements") or []
+    grouped_controls: dict[str, dict[str, object]] = {}
+    for row in control_rows:
+        control_code = str(row.get("ControlCode") or "")
+        if control_code not in grouped_controls:
+            grouped_controls[control_code] = {
+                "ControlCode": control_code,
+                "ControlName": str(row.get("ControlName") or ""),
+                "ControlTypeName": str(row.get("ControlTypeName") or ""),
+                "ControlTypeCode": str(row.get("ControlTypeCode") or ""),
+                "Rows": [],
+            }
+        grouped_controls[control_code]["Rows"].append(row)
+
+    control_html_parts: list[str] = []
+    if grouped_controls:
+        for group in grouped_controls.values():
+            header = html.escape(str(group.get("ControlName") or "Control"))
+            detail = html.escape(
+                f"{group.get('ControlTypeName') or ''} ({group.get('ControlTypeCode') or ''}) | {group.get('ControlCode') or ''}"
+            )
+            control_html_parts.append(
+                f"""
+                <section class="control-card">
+                  <h3>{header}</h3>
+                  <div class="control-meta">{detail}</div>
+                  {_render_policy_line_items(group.get("Rows") or [])}
+                </section>
+                """
+            )
+    else:
+        control_html_parts.append("<p class=\"empty\">No policy statements by control were saved.</p>")
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{policy_title}</title>
+  <style>
+    body {{
+      margin: 0;
+      background: #f3f1ec;
+      color: #263746;
+      font-family: Segoe UI, Arial, sans-serif;
+    }}
+    .page {{
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 18px;
+    }}
+    .hero {{
+      background: #18344A;
+      color: #f7f3ea;
+      border-radius: 8px;
+      padding: 18px 20px;
+    }}
+    .hero h1 {{
+      margin: 0;
+      font-size: 28px;
+    }}
+    .hero .sub {{
+      margin-top: 6px;
+      font-size: 13px;
+      color: #d7e2ea;
+    }}
+    .meta-grid {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }}
+    .meta-card, .section-card, .control-card {{
+      background: #ffffff;
+      border: 1px solid #d6d0c4;
+      border-radius: 6px;
+    }}
+    .meta-card {{
+      padding: 12px;
+    }}
+    .meta-label {{
+      font-size: 11px;
+      color: #5b6770;
+      margin-bottom: 4px;
+    }}
+    .meta-value {{
+      font-size: 14px;
+      font-weight: 600;
+    }}
+    .section-card, .control-card {{
+      padding: 14px 16px;
+      margin-top: 14px;
+    }}
+    h2 {{
+      margin: 0 0 10px;
+      font-size: 20px;
+    }}
+    h3 {{
+      margin: 0;
+      font-size: 17px;
+    }}
+    .control-meta {{
+      margin-top: 4px;
+      margin-bottom: 10px;
+      color: #5b6770;
+      font-size: 12px;
+    }}
+    ol {{
+      margin: 0;
+      padding-left: 22px;
+    }}
+    li {{
+      margin: 0 0 10px;
+    }}
+    .line-meta {{
+      color: #5b6770;
+      font-size: 11px;
+      margin-bottom: 3px;
+    }}
+    .empty {{
+      margin: 0;
+      color: #5b6770;
+    }}
+    @media (max-width: 900px) {{
+      .meta-grid {{
+        grid-template-columns: 1fr;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <h1>{policy_title}</h1>
+      <div class="sub">{root_domain_name} ({root_domain_code})</div>
+    </div>
+
+    <div class="meta-grid">
+      <div class="meta-card">
+        <div class="meta-label">Policy Code</div>
+        <div class="meta-value">{policy_code}</div>
+      </div>
+      <div class="meta-card">
+        <div class="meta-label">Version / Status</div>
+        <div class="meta-value">{version_text} / {status}</div>
+      </div>
+      <div class="meta-card">
+        <div class="meta-label">Template / Model</div>
+        <div class="meta-value">{template_name} / {model_name}</div>
+      </div>
+    </div>
+
+    <div class="meta-grid">
+      <div class="meta-card">
+        <div class="meta-label">Root Domain</div>
+        <div class="meta-value">{root_domain_name}</div>
+      </div>
+      <div class="meta-card">
+        <div class="meta-label">Domain Code</div>
+        <div class="meta-value">{root_domain_code}</div>
+      </div>
+      <div class="meta-card">
+        <div class="meta-label">Last Saved</div>
+        <div class="meta-value">{updated_at}</div>
+      </div>
+    </div>
+
+    <section class="section-card">
+      <h2>Objectives</h2>
+      {_render_policy_line_items(policy_data.get("objectives") or [])}
+    </section>
+
+    <section class="section-card">
+      <h2>Principles</h2>
+      {_render_policy_line_items(policy_data.get("principles") or [])}
+    </section>
+
+    <section class="section-card">
+      <h2>Accountability</h2>
+      {_render_policy_line_items(policy_data.get("accountability") or [])}
+    </section>
+
+    <section class="section-card">
+      <h2>Transparency</h2>
+      {_render_policy_line_items(policy_data.get("transparency") or [])}
+    </section>
+
+    <section class="section-card">
+      <h2>Strategy</h2>
+      {_render_policy_line_items(policy_data.get("strategy") or [])}
+    </section>
+
+    <section class="section-card">
+      <h2>Policy Statements By Control</h2>
+      {''.join(control_html_parts)}
+    </section>
+
+    <section class="section-card">
+      <h2>Consequences</h2>
+      {_render_policy_line_items(policy_data.get("consequences") or [])}
+    </section>
+  </div>
+</body>
+</html>"""
 
 
 def _extract_json_object(raw_text: str) -> dict[str, object]:
@@ -667,6 +2762,14 @@ def create_app() -> FastAPI:
     def domain_types() -> list[dict[str, object]]:
         return list_domain_types(settings)
 
+    @app.post("/domain-types")
+    def add_domain_type(request: CreateDomainTypeRequest) -> dict[str, object]:
+        return create_domain_type(
+            settings,
+            name=request.name,
+            description=request.description,
+        )
+
     @app.get("/domain-orientations")
     def domain_orientations() -> list[dict[str, object]]:
         return list_domain_orientations(settings)
@@ -682,13 +2785,261 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/controls/report-rows")
+    def controls_report_rows() -> list[dict[str, object]]:
+        return list_controls_report_rows(settings)
+
+    @app.get("/reports/controls-smart", response_class=HTMLResponse)
+    def controls_smart_report() -> HTMLResponse:
+        rows = list_controls_report_rows(settings)
+        return HTMLResponse(_build_controls_report_html(rows))
+
+    @app.get("/reports/policy-draft", response_class=HTMLResponse)
+    def policy_draft_report(
+        domainCode: str | None = None,
+        templatePath: str = "Policy/Policy-Template-1.01.md",
+        model: str | None = None,
+    ) -> HTMLResponse:
+        try:
+            template_file = _resolve_repo_relative_path(templatePath)
+            template_text = template_file.read_text(encoding="utf-8")
+            all_domains = list_domains(settings)
+            selected_model = (model or settings.ollama_chat_model).strip()
+            report_rows = list_controls_report_rows(settings)
+            domain_codes_with_controls = {
+                str(row.get("DomainCode") or "").strip()
+                for row in report_rows
+                if row.get("DomainCode")
+            }
+            available_domains = [
+                domain
+                for domain in all_domains
+                if str(domain.get("DomainCode") or "").strip() in domain_codes_with_controls
+            ]
+            selected_domain_code = (domainCode or "").strip()
+            domain_options = [
+                {
+                    "value": "",
+                    "label": "Select a domain...",
+                    "selected": not selected_domain_code,
+                },
+                *[
+                    {
+                        "value": str(domain.get("DomainCode") or ""),
+                        "label": _domain_breadcrumb(domain, all_domains),
+                        "selected": str(domain.get("DomainCode") or "") == selected_domain_code,
+                    }
+                    for domain in available_domains
+                ],
+            ]
+
+            root_domain_name = "No domain selected"
+            draft_html = (
+                "<p>Select a domain, keep or change the template path and model if you want, then click <strong>Generate</strong>.</p>"
+            )
+
+            if selected_domain_code:
+                context = get_control_suggestion_context(settings, selected_domain_code)
+                root_domain = context.get("rootDomain") or {}
+                branch_domains = context.get("branchDomains") or []
+                existing_controls = context.get("existingControls") or []
+                system_prompt, user_prompt = _build_policy_generation_prompt(
+                    template_text,
+                    root_domain,
+                    branch_domains,
+                    existing_controls,
+                    all_domains,
+                )
+                payload = _generate_with_ollama(
+                    settings,
+                    f"{system_prompt}\n\n{user_prompt}",
+                    model=selected_model,
+                    trace_label="policy.browser-draft",
+                )
+                draft_markdown = _finalize_policy_markdown(
+                    str(root_domain.get("DisplayName") or selected_domain_code),
+                    str(payload.get("response", "")).strip(),
+                )
+                draft_html = _render_simple_markdown_to_html(draft_markdown)
+                root_domain_name = str(root_domain.get("DisplayName") or selected_domain_code)
+
+            return HTMLResponse(
+                _build_policy_browser_html(
+                    domain_code=selected_domain_code,
+                    template_path=templatePath,
+                    model_name=selected_model,
+                    body_html=draft_html,
+                    root_domain_name=root_domain_name,
+                    domain_options=domain_options,
+                )
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/policy-drafts/content")
+    def policy_draft_content(request: PolicyDraftContentRequest) -> dict[str, object]:
+        try:
+            template_file = _resolve_repo_relative_path(request.templatePath)
+            template_text = template_file.read_text(encoding="utf-8")
+            all_domains = list_domains(settings)
+            context = get_control_suggestion_context(settings, request.domainCode)
+            branch_controls = list_controls_for_branch(settings, request.domainCode)
+            included_control_codes = None if request.includedControlCodes is None else {
+                str(code).strip().upper()
+                for code in request.includedControlCodes
+                if str(code).strip()
+            }
+            if included_control_codes is not None:
+                branch_controls = [
+                    control
+                    for control in branch_controls
+                    if str(control.get("ControlCode") or "").strip().upper() in included_control_codes
+                ]
+            root_domain = context.get("rootDomain") or {}
+            branch_domains = context.get("branchDomains") or []
+            selected_model = (request.model or settings.ollama_chat_model).strip()
+            system_prompt, user_prompt = _build_policy_content_prompt(
+                template_text,
+                root_domain,
+                branch_domains,
+                branch_controls,
+                all_domains,
+            )
+            payload = _generate_with_ollama(
+                settings,
+                f"{system_prompt}\n\n{user_prompt}",
+                model=selected_model,
+                trace_label="policy.content-draft",
+            )
+            parsed = _extract_json_object(str(payload.get("response", "")).strip())
+            normalized = _normalize_policy_content_draft(
+                parsed,
+                root_domain,
+                branch_controls,
+                str(payload.get("model") or selected_model),
+                all_domains,
+            )
+            normalized["metrics"] = _extract_metrics(payload, model=selected_model)
+            return normalized
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/policy-drafts/redraft-line")
+    def policy_draft_redraft_line(request: PolicyDraftLineRetryRequest) -> dict[str, object]:
+        try:
+            template_file = _resolve_repo_relative_path(request.templatePath)
+            template_text = template_file.read_text(encoding="utf-8")
+            all_domains = list_domains(settings)
+            context = get_control_suggestion_context(settings, request.domainCode)
+            branch_controls = list_controls_for_branch(settings, request.domainCode)
+            included_control_codes = None if request.includedControlCodes is None else {
+                str(code).strip().upper()
+                for code in request.includedControlCodes
+                if str(code).strip()
+            }
+            if included_control_codes is not None:
+                branch_controls = [
+                    control
+                    for control in branch_controls
+                    if str(control.get("ControlCode") or "").strip().upper() in included_control_codes
+                ]
+            root_domain = context.get("rootDomain") or {}
+            branch_domains = context.get("branchDomains") or []
+            selected_model = (request.model or settings.ollama_chat_model).strip()
+            prompt = _build_policy_line_retry_prompt(
+                template_text=template_text,
+                root_domain=root_domain,
+                branch_domains=branch_domains,
+                branch_controls=branch_controls,
+                all_domains=all_domains,
+                section_key=request.sectionKey,
+                current_text=request.currentText,
+                control_code=request.controlCode,
+            )
+            payload = _generate_with_ollama(
+                settings,
+                prompt,
+                model=selected_model,
+                trace_label="policy.line-redraft",
+            )
+            replacement_text = str(payload.get("response", "")).strip()
+            if replacement_text.startswith("```"):
+                replacement_text = re.sub(r"^```(?:text)?\s*", "", replacement_text, flags=re.IGNORECASE)
+                replacement_text = re.sub(r"\s*```$", "", replacement_text)
+            replacement_text = " ".join(replacement_text.split())
+            if not replacement_text:
+                raise ValueError("The model did not return replacement text.")
+
+            return {
+                "text": replacement_text,
+                "sectionKey": request.sectionKey,
+                "controlCode": request.controlCode,
+                "modelName": str(payload.get("model") or selected_model),
+                "metrics": _extract_metrics(payload, model=selected_model),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/policies/save-draft")
+    def save_policy_draft(request: SavePolicyDraftRequest) -> dict[str, object]:
+        try:
+            template_body = None
+            if request.templatePath:
+                template_file = _resolve_repo_relative_path(request.templatePath)
+                template_body = template_file.read_text(encoding="utf-8")
+
+            return upsert_policy_draft(
+                settings,
+                root_domain_code=request.rootDomainCode,
+                policy_code=request.policyCode,
+                policy_title=request.policyTitle,
+                version_text=request.versionText,
+                status=request.status,
+                template_path=request.templatePath,
+                template_body=template_body,
+                source_model_name=request.sourceModelName,
+                objectives=[item.model_dump() for item in request.objectives],
+                principles=[item.model_dump() for item in request.principles],
+                accountability=[item.model_dump() for item in request.accountability],
+                transparency=[item.model_dump() for item in request.transparency],
+                strategy=[item.model_dump() for item in request.strategy],
+                consequences=[item.model_dump() for item in request.consequences],
+                control_statements=[item.model_dump() for item in request.controlStatements],
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/policies/by-root-domain/{domainCode}")
+    def load_policy_draft_for_domain(domainCode: str) -> dict[str, object]:
+        try:
+            policy_data = get_latest_policy_for_root_domain(settings, domainCode)
+            if not policy_data:
+                raise HTTPException(status_code=404, detail="No saved policy exists for this domain.")
+            return _build_saved_policy_draft_payload(policy_data)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/policies/testing/clear-all")
+    def clear_all_policy_test_data() -> dict[str, object]:
+        try:
+            return clear_policy_tables(settings)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/controls/suggest")
     def suggest_controls(request: ControlSuggestionRequest) -> dict[str, object]:
         try:
             context = get_control_suggestion_context(settings, request.branchRootDomainCode)
             control_types = list_control_types(settings)
             prompt = _build_control_suggestion_prompt_text(context, control_types, request)
-            payload = _generate_with_ollama(settings, prompt, model=request.model)
+            payload = _generate_with_ollama(
+                settings,
+                prompt,
+                model=request.model,
+                trace_label="controls.suggest",
+            )
             parsed = _extract_json_object(str(payload.get("response") or ""))
             suggestions = parsed.get("suggestions")
             if not isinstance(suggestions, list):
@@ -743,6 +3094,106 @@ def create_app() -> FastAPI:
             return {
                 "suggestions": normalized_suggestions,
                 "metrics": _extract_metrics(payload, request.model),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/controls/grouping/ai")
+    def ai_group_controls(request: ControlGroupingRequest) -> dict[str, object]:
+        try:
+            context = get_control_suggestion_context(settings, request.domainCode)
+            branch_controls = list_controls_for_branch(settings, request.domainCode)
+            if request.controlCodes is not None:
+                allowed_codes = {
+                    str(code).strip().upper()
+                    for code in request.controlCodes
+                    if str(code).strip()
+                }
+                branch_controls = [
+                    item
+                    for item in branch_controls
+                    if str(item.get("ControlCode") or "").strip().upper() in allowed_codes
+                ]
+
+            if not branch_controls:
+                return {"groups": [], "assignments": [], "metrics": _extract_metrics({}, request.model)}
+
+            prompt = _build_ai_control_grouping_prompt(
+                root_domain=context.get("rootDomain") or {},
+                branch_controls=branch_controls,
+            )
+            selected_model = request.model or settings.ollama_chat_model
+            payload = _generate_with_ollama(
+                settings,
+                prompt,
+                model=selected_model,
+                trace_label="controls.grouping.ai",
+            )
+            parsed = _extract_json_object(str(payload.get("response") or "").strip())
+            raw_groups = parsed.get("groups")
+            if not isinstance(raw_groups, list):
+                raise ValueError("The model response did not include a groups array.")
+
+            valid_control_codes = {
+                str(item.get("ControlCode") or "").strip().upper(): str(item.get("ControlCode") or "").strip()
+                for item in branch_controls
+                if item.get("ControlCode")
+            }
+            grouped_assignments: dict[str, str] = {}
+            normalized_groups: list[dict[str, object]] = []
+            for raw_group in raw_groups:
+                if not isinstance(raw_group, dict):
+                    continue
+                label = str(raw_group.get("label") or "").strip()
+                if not label:
+                    continue
+                raw_codes = raw_group.get("controlCodes")
+                if not isinstance(raw_codes, list):
+                    continue
+                normalized_codes: list[str] = []
+                for raw_code in raw_codes:
+                    code_key = str(raw_code or "").strip().upper()
+                    if not code_key or code_key not in valid_control_codes or code_key in grouped_assignments:
+                        continue
+                    canonical_code = valid_control_codes[code_key]
+                    grouped_assignments[code_key] = label
+                    normalized_codes.append(canonical_code)
+                if normalized_codes:
+                    normalized_groups.append(
+                        {
+                            "label": label,
+                            "controlCodes": normalized_codes,
+                        }
+                    )
+
+            unassigned_codes = [
+                canonical_code
+                for code_key, canonical_code in valid_control_codes.items()
+                if code_key not in grouped_assignments
+            ]
+            if unassigned_codes:
+                fallback_label = "Other Controls"
+                normalized_groups.append(
+                    {
+                        "label": fallback_label,
+                        "controlCodes": unassigned_codes,
+                    }
+                )
+                for code in unassigned_codes:
+                    grouped_assignments[code.strip().upper()] = fallback_label
+
+            assignments = [
+                {
+                    "controlCode": str(item.get("ControlCode") or ""),
+                    "groupLabel": grouped_assignments.get(str(item.get("ControlCode") or "").strip().upper(), "Other Controls"),
+                }
+                for item in branch_controls
+            ]
+
+            return {
+                "groups": normalized_groups,
+                "assignments": assignments,
+                "metrics": _extract_metrics(payload, selected_model),
             }
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -810,7 +3261,12 @@ def create_app() -> FastAPI:
 
         domain_context = get_domain_assist_context(settings, request.domainCode)
         compiled_prompt = _build_domain_assist_prompt(domain_context, instruction, request.draftText)
-        answer_payload = _generate_with_ollama(settings, compiled_prompt, model=request.model)
+        answer_payload = _generate_with_ollama(
+            settings,
+            compiled_prompt,
+            model=request.model,
+            trace_label="domains.assist",
+        )
         answer = str(answer_payload.get("response", "")).strip()
 
         return {
@@ -851,7 +3307,12 @@ def create_app() -> FastAPI:
             request.draftText,
             domain_types,
         )
-        answer_payload = _generate_with_ollama(settings, compiled_prompt, model=request.model)
+        answer_payload = _generate_with_ollama(
+            settings,
+            compiled_prompt,
+            model=request.model,
+            trace_label="domains.child-suggest",
+        )
         raw_answer = str(answer_payload.get("response", "")).strip()
 
         try:
@@ -956,6 +3417,16 @@ def create_app() -> FastAPI:
             description=request.description,
             domain_type_id=request.domainTypeId,
             domain_orientation_id=request.domainOrientationId,
+            parent_domain_id=request.parentDomainId,
+        )
+
+    @app.post("/domains/move")
+    def move_domain_node(request: MoveDomainRequest) -> dict[str, object]:
+        return move_domain(
+            settings,
+            domain_code=request.domainCode,
+            new_parent_domain_code=request.newParentDomainCode,
+            new_domain_type_id=request.newDomainTypeId,
         )
 
     @app.put("/domain-sibling-order")
@@ -965,6 +3436,13 @@ def create_app() -> FastAPI:
             parent_domain_id=request.parentDomainId,
             orientation_code=request.orientationCode,
             ordered_domain_codes=request.orderedDomainCodes,
+        )
+
+    @app.put("/domain-type-order")
+    def reorder_types(request: ReorderDomainTypesRequest) -> dict[str, object]:
+        return reorder_domain_types(
+            settings,
+            ordered_type_ids=request.orderedTypeIds,
         )
 
     @app.get("/domains/{domainCode}/delete-preview")
@@ -978,6 +3456,18 @@ def create_app() -> FastAPI:
     @app.get("/collections")
     def collections(domainCode: str | None = None) -> list[dict[str, object]]:
         return list_collections(settings, domainCode)
+
+    @app.get("/policies")
+    def policies() -> list[dict[str, object]]:
+        return list_policies(settings)
+
+    @app.get("/policies/{policyId}/presentation", response_class=HTMLResponse)
+    def policy_presentation(policyId: str) -> HTMLResponse:
+        try:
+            policy_data = get_policy_presentation_data(settings, policyId)
+            return HTMLResponse(_build_saved_policy_html(policy_data))
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/collections")
     def add_collection(request: CreateCollectionRequest) -> dict[str, object]:
@@ -1008,13 +3498,21 @@ def create_app() -> FastAPI:
 
     @app.post("/documents/text")
     def add_text_document(request: CreateTextDocumentRequest) -> dict[str, object]:
-        return create_text_document(
+        result = create_text_document(
             settings,
             collection_code=request.collectionCode,
             source_name=request.sourceName,
             body_text=request.bodyText,
             source_type=request.sourceType,
         )
+        try:
+            result["EmbeddingResult"] = _ensure_embeddings_for_content(
+                settings,
+                document_id=str(result.get("DocumentId") or ""),
+            )
+        except Exception as exc:
+            result["EmbeddingError"] = str(exc)
+        return result
 
     @app.post("/documents/pdf")
     async def add_pdf_document(
@@ -1036,6 +3534,13 @@ def create_app() -> FastAPI:
             body_text=extracted_text,
             source_type="pdf_upload",
         )
+        try:
+            result["EmbeddingResult"] = _ensure_embeddings_for_content(
+                settings,
+                document_id=str(result.get("DocumentId") or ""),
+            )
+        except Exception as exc:
+            result["EmbeddingError"] = str(exc)
         result["ExtractionStats"] = stats
         return result
 
@@ -1061,30 +3566,88 @@ def create_app() -> FastAPI:
     def retrieval_profiles() -> list[dict[str, object]]:
         return list_retrieval_profiles(settings)
 
+    @app.get("/debug/embedding-status")
+    def embedding_status() -> dict[str, object]:
+        profile = get_default_embedding_profile(settings)
+        status = list_embedding_status(
+            settings,
+            embedding_profile_id=str(profile["EmbeddingProfileId"]),
+        )
+        return {
+            "profileCode": str(profile.get("ProfileCode") or ""),
+            "modelName": str(profile.get("ModelName") or ""),
+            "vectorDimension": int(profile.get("VectorDimension") or 768),
+            **status,
+        }
+
+    @app.get("/debug/embeddings", response_class=HTMLResponse)
+    def embedding_status_html() -> HTMLResponse:
+        status = embedding_status()
+        base_url = _resolve_backend_base_url(settings)
+        return HTMLResponse(_build_embedding_debug_html(base_url, status))
+
+    @app.post("/debug/embeddings/backfill")
+    def embedding_backfill(collectionCode: str | None = None, limit: int = 200) -> dict[str, object]:
+        collection_codes = [collectionCode] if collectionCode and collectionCode.strip() else None
+        result = _ensure_embeddings_for_content(
+            settings,
+            collection_codes=collection_codes,
+            limit=max(1, min(limit, 2000)),
+        )
+        status = embedding_status()
+        return {
+            "status": "ok",
+            "backfill": result,
+            "embeddingStatus": status,
+        }
+
+    @app.get("/debug/llm-traces.json")
+    def llm_traces_json() -> dict[str, object]:
+        traces = _list_llm_traces()
+        return {
+            "count": len(traces),
+            "traces": traces,
+        }
+
+    @app.get("/debug/llm-traces")
+    def llm_traces_html() -> HTMLResponse:
+        traces = _list_llm_traces()
+        base_url = _resolve_backend_base_url(settings)
+        return HTMLResponse(_build_llm_trace_html(base_url, traces))
+
+    @app.post("/ask/context-preview")
+    def ask_context_preview(request: AskRequest) -> ContextPreviewResponse:
+        context_units, retrieval_info = _retrieve_context_for_chat(settings, request)
+        context_text = chr(10).join(_build_context_lines(context_units)) if context_units else ""
+        context_token_count = sum(
+            int(row.get("TokenCount") or 0) if int(row.get("TokenCount") or 0) > 0 else _estimate_token_count(str(row.get("BodyText") or ""))
+            for row in context_units
+        )
+        sources = _build_source_items(context_units)
+        return ContextPreviewResponse(
+            retrievalMode=str(retrieval_info.get("retrievalMode") or "FullContext"),
+            retrievalWarning=str(retrieval_info.get("fallbackReason") or ""),
+            usedCollectionCodes=list(retrieval_info.get("collectionCodes") or []),
+            contextUnitCount=len(context_units),
+            contextTokenCount=context_token_count,
+            contextCharCount=len(context_text),
+            sourceCount=len({
+                f"{source.get('collectionDisplayName')}::{source.get('sourceName')}"
+                for source in sources
+            }),
+            sources=sources,
+        )
+
     @app.post("/ask")
     def ask(request: AskRequest) -> dict[str, object]:
         prompt = request.prompt.strip()
         if not prompt:
             return {"error": "Prompt is required."}
 
-        collection_codes = [request.shortMemoryCollectionCode, *request.longTermCollectionCodes]
-        context_units = get_recent_context_units(settings, collection_codes)
-
-        context_lines: list[str] = []
-        sources: list[dict[str, object]] = []
-        for unit in context_units:
-            collection_display = unit.get("CollectionDisplayName") or unit.get("CollectionCode")
-            source_name = unit.get("SourceName") or "unknown"
-            body = unit.get("BodyText") or ""
-            context_lines.append(f"[{collection_display} | {source_name}] {body}")
-            sources.append(
-                {
-                    "collectionCode": unit.get("CollectionCode"),
-                    "collectionDisplayName": collection_display,
-                    "sourceName": source_name,
-                    "contentUnitId": unit.get("ContentUnitId"),
-                }
-            )
+        context_units, retrieval_info = _retrieve_context_for_chat(settings, request)
+        collection_codes = list(retrieval_info.get("collectionCodes") or [])
+        context_lines = _build_context_lines(context_units)
+        sources = _build_source_items(context_units)
 
         history_lines = []
         for item in request.history:
@@ -1093,15 +3656,38 @@ def create_app() -> FastAPI:
             if role and content:
                 history_lines.append(f"{role.title()}: {content}")
 
+        context_text = chr(10).join(context_lines) if context_lines else "No stored context was found."
+        history_text = chr(10).join(history_lines) if history_lines else "No previous conversation."
+
         compiled_prompt = (
             "Answer the user using the provided short-memory and durable-domain context when relevant. "
             "If the context is thin or missing, say so clearly.\n\n"
-            f"Conversation so far:\n{chr(10).join(history_lines) if history_lines else 'No previous conversation.'}\n\n"
+            f"Conversation so far:\n{history_text}\n\n"
             f"User prompt:\n{prompt}\n\n"
-            f"Context:\n{chr(10).join(context_lines) if context_lines else 'No stored context was found.'}\n"
+            f"Context:\n{context_text}\n"
         )
+        trace_metadata = {
+            **_build_chat_trace_metadata(
+                retrieval_mode=str(retrieval_info.get("retrievalMode") or "FullContext"),
+                collection_codes=collection_codes,
+                context_units=context_units,
+                context_text=context_text,
+                prompt=prompt,
+                history_lines=history_lines,
+                history_text=history_text,
+                compiled_prompt=compiled_prompt,
+                retrieval_profile=retrieval_info.get("retrievalProfile") if isinstance(retrieval_info.get("retrievalProfile"), dict) else None,
+                fallback_reason=str(retrieval_info.get("fallbackReason") or "") or None,
+            ),
+        }
 
-        answer_payload = _generate_with_ollama(settings, compiled_prompt, model=request.model)
+        answer_payload = _generate_with_ollama(
+            settings,
+            compiled_prompt,
+            model=request.model,
+            trace_label="chat.ask",
+            trace_metadata=trace_metadata,
+        )
         answer = str(answer_payload.get("response", "")).strip()
         title = _generate_title(settings, prompt, answer)
         return {
@@ -1109,6 +3695,8 @@ def create_app() -> FastAPI:
             "title": title,
             "sources": sources,
             "usedCollectionCodes": collection_codes,
+            "retrievalMode": retrieval_info.get("retrievalMode"),
+            "retrievalWarning": retrieval_info.get("fallbackReason") or "",
             "metrics": _extract_metrics(answer_payload, model=request.model),
         }
 
@@ -1118,24 +3706,10 @@ def create_app() -> FastAPI:
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt is required.")
 
-        collection_codes = [request.shortMemoryCollectionCode, *request.longTermCollectionCodes]
-        context_units = get_recent_context_units(settings, collection_codes)
-
-        context_lines: list[str] = []
-        sources: list[dict[str, object]] = []
-        for unit in context_units:
-            collection_display = unit.get("CollectionDisplayName") or unit.get("CollectionCode")
-            source_name = unit.get("SourceName") or "unknown"
-            body = unit.get("BodyText") or ""
-            context_lines.append(f"[{collection_display} | {source_name}] {body}")
-            sources.append(
-                {
-                    "collectionCode": unit.get("CollectionCode"),
-                    "collectionDisplayName": collection_display,
-                    "sourceName": source_name,
-                    "contentUnitId": unit.get("ContentUnitId"),
-                }
-            )
+        context_units, retrieval_info = _retrieve_context_for_chat(settings, request)
+        collection_codes = list(retrieval_info.get("collectionCodes") or [])
+        context_lines = _build_context_lines(context_units)
+        sources = _build_source_items(context_units)
 
         history_lines = []
         for item in request.history:
@@ -1144,13 +3718,30 @@ def create_app() -> FastAPI:
             if role and content:
                 history_lines.append(f"{role.title()}: {content}")
 
+        context_text = chr(10).join(context_lines) if context_lines else "No stored context was found."
+        history_text = chr(10).join(history_lines) if history_lines else "No previous conversation."
+
         compiled_prompt = (
             "Answer the user using the provided short-memory and durable-domain context when relevant. "
             "If the context is thin or missing, say so clearly.\n\n"
-            f"Conversation so far:\n{chr(10).join(history_lines) if history_lines else 'No previous conversation.'}\n\n"
+            f"Conversation so far:\n{history_text}\n\n"
             f"User prompt:\n{prompt}\n\n"
-            f"Context:\n{chr(10).join(context_lines) if context_lines else 'No stored context was found.'}\n"
+            f"Context:\n{context_text}\n"
         )
+        trace_metadata = {
+            **_build_chat_trace_metadata(
+                retrieval_mode=str(retrieval_info.get("retrievalMode") or "FullContext"),
+                collection_codes=collection_codes,
+                context_units=context_units,
+                context_text=context_text,
+                prompt=prompt,
+                history_lines=history_lines,
+                history_text=history_text,
+                compiled_prompt=compiled_prompt,
+                retrieval_profile=retrieval_info.get("retrievalProfile") if isinstance(retrieval_info.get("retrievalProfile"), dict) else None,
+                fallback_reason=str(retrieval_info.get("fallbackReason") or "") or None,
+            ),
+        }
 
         async def event_stream():
             answer_parts: list[str] = []
@@ -1159,7 +3750,13 @@ def create_app() -> FastAPI:
             title_task = asyncio.create_task(asyncio.to_thread(_generate_prompt_title, settings, prompt))
             emitted_generated_title = False
             try:
-                async for payload in _stream_with_ollama(settings, compiled_prompt, model=request.model):
+                async for payload in _stream_with_ollama(
+                    settings,
+                    compiled_prompt,
+                    model=request.model,
+                    trace_label="chat.ask.stream",
+                    trace_metadata=trace_metadata,
+                ):
                     if title_task.done() and not emitted_generated_title:
                         try:
                             generated_title = title_task.result()
@@ -1184,6 +3781,8 @@ def create_app() -> FastAPI:
                                 "title": title,
                                 "sources": sources,
                                 "usedCollectionCodes": collection_codes,
+                                "retrievalMode": retrieval_info.get("retrievalMode"),
+                                "retrievalWarning": retrieval_info.get("fallbackReason") or "",
                                 "metrics": _extract_metrics(payload, model=request.model),
                             }
                         ) + "\n"

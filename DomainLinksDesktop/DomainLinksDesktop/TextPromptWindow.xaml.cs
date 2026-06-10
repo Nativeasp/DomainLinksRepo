@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.ComponentModel;
 
 namespace DomainLinksDesktop;
 
@@ -8,6 +9,17 @@ public partial class TextPromptWindow : Window
     public TextPromptWindow(string title, string prompt, string initialValue = "", string? hint = null)
     {
         InitializeComponent();
+        var settings = DomainLinksDesktopSettings.Load();
+        Width = settings.TextPromptWindowWidth;
+        Height = settings.TextPromptWindowHeight;
+        if (!double.IsNaN(settings.TextPromptWindowLeft))
+        {
+            Left = settings.TextPromptWindowLeft;
+        }
+        if (!double.IsNaN(settings.TextPromptWindowTop))
+        {
+            Top = settings.TextPromptWindowTop;
+        }
         Title = title;
         PromptTextBlock.Text = prompt;
         ValueTextBox.Text = initialValue;
@@ -22,6 +34,7 @@ public partial class TextPromptWindow : Window
             ValueTextBox.Focus();
             ValueTextBox.SelectAll();
         };
+        Closing += TextPromptWindow_OnClosing;
     }
 
     public string ResultText { get; private set; } = string.Empty;
@@ -53,5 +66,17 @@ public partial class TextPromptWindow : Window
             OkButton_OnClick(sender, new RoutedEventArgs());
             e.Handled = true;
         }
+    }
+
+    private void TextPromptWindow_OnClosing(object? sender, CancelEventArgs e)
+    {
+        var saved = DomainLinksDesktopSettings.Load() with
+        {
+            TextPromptWindowWidth = Width,
+            TextPromptWindowHeight = ActualHeight,
+            TextPromptWindowLeft = Left,
+            TextPromptWindowTop = Top,
+        };
+        saved.Save();
     }
 }
