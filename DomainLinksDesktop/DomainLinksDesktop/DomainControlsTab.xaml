@@ -6,10 +6,10 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="10" />
+            <RowDefinition Height="6" />
             <RowDefinition x:Name="BranchControlsRow" Height="*" MinHeight="150" />
-            <RowDefinition Height="8" />
-            <RowDefinition Height="1.35*" MinHeight="260" />
+            <RowDefinition Height="6" />
+            <RowDefinition Height="*" MinHeight="180" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -19,14 +19,14 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock FontSize="17"
+                <TextBlock FontSize="15"
                            FontWeight="SemiBold"
                            Foreground="#263746"
                            Text="Controls" />
                 <TextBlock x:Name="BranchSummaryTextBlock"
-                           Margin="0,4,0,0"
+                           Margin="0,2,0,0"
                            Foreground="#5B6770"
-                           FontSize="12"
+                           FontSize="11"
                            Text="Select a domain, then open this tab." />
             </StackPanel>
             <Button Grid.Column="1"
@@ -42,30 +42,32 @@
                 BorderBrush="#D6D0C4"
                 BorderThickness="1"
                 CornerRadius="6"
-                Padding="8">
+                Padding="6">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="8" />
+                    <RowDefinition Height="4" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <TextBlock FontWeight="SemiBold"
                            Foreground="#263746"
-                           Text="Branch Controls" />
+                           FontSize="12"
+                           Text="Controls In Scope" />
                 <DataGrid Grid.Row="2"
                           x:Name="BranchControlsDataGrid"
                           AutoGenerateColumns="False"
                           CanUserAddRows="False"
                           IsReadOnly="True"
                           VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
                           HeadersVisibility="Column"
                           GridLinesVisibility="Horizontal"
-                          ItemsSource="{Binding BranchControls, RelativeSource={RelativeSource AncestorType=local:DomainControlsTab}}"
+                          ItemsSource="{Binding DisplayControls, RelativeSource={RelativeSource AncestorType=local:DomainControlsTab}}"
                           SelectionMode="Single"
                           SelectionChanged="BranchControlsDataGrid_OnSelectionChanged">
                     <DataGrid.RowStyle>
                         <Style TargetType="DataGridRow">
+                            <Setter Property="FontStyle" Value="Normal" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsCurrentDomainControl}" Value="False">
                                     <Setter Property="Opacity" Value="0.55" />
@@ -74,18 +76,20 @@
                                 <DataTrigger Binding="{Binding IsCurrentDomainControl}" Value="True">
                                     <Setter Property="FontWeight" Value="SemiBold" />
                                 </DataTrigger>
+                                <DataTrigger Binding="{Binding IsPending}" Value="True">
+                                    <Setter Property="FontStyle" Value="Italic" />
+                                    <Setter Property="Opacity" Value="0.9" />
+                                </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </DataGrid.RowStyle>
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="Domain"
-                                            Width="180"
-                                            Binding="{Binding DomainDisplayName}" />
                         <DataGridTextColumn Header="Control"
-                                            Width="240"
+                                            Width="*"
+                                            MinWidth="260"
                                             Binding="{Binding DisplayName}" />
                         <DataGridTemplateColumn Header="Type"
-                                                Width="170">
+                                                Width="190">
                             <DataGridTemplateColumn.CellStyle>
                                 <Style TargetType="DataGridCell">
                                     <Setter Property="ToolTip" Value="{Binding ControlTypeDescription}" />
@@ -98,11 +102,8 @@
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
-                        <DataGridTextColumn Header="Code"
-                                            Width="230"
-                                            Binding="{Binding ControlCode}" />
                         <DataGridTextColumn Header="Status"
-                                            Width="90"
+                                            Width="92"
                                             Binding="{Binding Status}" />
                     </DataGrid.Columns>
                 </DataGrid>
@@ -120,7 +121,7 @@
 
         <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="SuggestionsColumn" Width="1.05*" MinWidth="220" />
+                <ColumnDefinition x:Name="SuggestionsColumn" Width="1.15*" MinWidth="220" />
                 <ColumnDefinition Width="8" />
                 <ColumnDefinition Width="*" MinWidth="220" />
             </Grid.ColumnDefinitions>
@@ -129,27 +130,26 @@
                     BorderBrush="#D6D0C4"
                     BorderThickness="1"
                     CornerRadius="6"
-                    Padding="10">
+                    Padding="8">
                 <ScrollViewer VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
-                    <Grid Margin="0,0,8,0"
-                          MinHeight="360">
+                    <Grid Margin="0"
+                          MinHeight="260">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="8" />
+                            <RowDefinition Height="4" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="8" />
-                            <RowDefinition Height="220" />
                         </Grid.RowDefinitions>
                         <TextBlock FontWeight="SemiBold"
                                    Foreground="#263746"
+                                   FontSize="12"
                                    Text="Suggest Controls" />
                         <Grid Grid.Row="2">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="8" />
+                                <RowDefinition Height="6" />
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="8" />
+                                <RowDefinition Height="6" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
@@ -163,8 +163,8 @@
                                            FontSize="11"
                                            Text="Control Type" />
                                 <ComboBox x:Name="ControlTypeComboBox"
-                                          Margin="0,4,0,0"
-                                          Height="32"
+                                          Margin="0,3,0,0"
+                                          Height="30"
                                           SelectionChanged="ControlTypeComboBox_OnSelectionChanged"
                                           SelectedValuePath="Code">
                                     <ComboBox.ItemContainerStyle>
@@ -186,12 +186,12 @@
                                            FontSize="11"
                                            Text="Idea / Focus" />
                                 <TextBox x:Name="IdeaTextBox"
-                                         Margin="0,4,0,0"
-                                         MinHeight="70"
+                                         Margin="0,3,0,0"
+                                         MinHeight="86"
                                          AcceptsReturn="True"
                                          TextWrapping="Wrap"
                                          VerticalScrollBarVisibility="Auto"
-                                         Padding="8,6" />
+                                         Padding="7,5" />
                             </StackPanel>
 
                             <StackPanel Grid.Row="2"
@@ -200,8 +200,8 @@
                                            FontSize="11"
                                            Text="Count" />
                                 <ComboBox x:Name="CountComboBox"
-                                          Margin="0,4,0,0"
-                                          Height="32"
+                                          Margin="0,3,0,0"
+                                          Height="30"
                                           SelectedIndex="2" />
                             </StackPanel>
 
@@ -211,56 +211,19 @@
                                         HorizontalAlignment="Right">
                                 <Button x:Name="PromptPreviewButton"
                                         Width="110"
-                                        Height="32"
+                                        Height="30"
                                         Margin="0,0,8,0"
                                         Click="PromptPreviewButton_OnClick"
                                         Content="Prompt Preview" />
                                 <Button x:Name="GenerateSuggestionsButton"
                                         Width="96"
-                                        Height="32"
+                                        Height="30"
                                         Click="GenerateSuggestionsButton_OnClick"
                                         Background="#18344A"
                                         Foreground="#FFFFFF"
                                         Content="Generate" />
                             </StackPanel>
                         </Grid>
-
-                        <DataGrid Grid.Row="4"
-                                  x:Name="SuggestionsDataGrid"
-                                  Margin="0,8,0,0"
-                                  AutoGenerateColumns="False"
-                                  CanUserAddRows="False"
-                                  IsReadOnly="True"
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Auto"
-                                  HeadersVisibility="Column"
-                                  GridLinesVisibility="Horizontal"
-                                  SelectionMode="Single"
-                                  SelectionChanged="SuggestionsDataGrid_OnSelectionChanged"
-                                  ItemsSource="{Binding Suggestions, RelativeSource={RelativeSource AncestorType=local:DomainControlsTab}}">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Suggestion"
-                                                    Width="260"
-                                                    Binding="{Binding DisplayName}" />
-                                <DataGridTemplateColumn Header="Type"
-                                                        Width="140">
-                                    <DataGridTemplateColumn.CellStyle>
-                                        <Style TargetType="DataGridCell">
-                                            <Setter Property="ToolTip" Value="{Binding ControlTypeDescription}" />
-                                            <Setter Property="ToolTipService.ShowDuration" Value="30000" />
-                                        </Style>
-                                    </DataGridTemplateColumn.CellStyle>
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding ControlTypeCode}" />
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="Domain"
-                                                    Width="180"
-                                                    Binding="{Binding DomainCode}" />
-                            </DataGrid.Columns>
-                        </DataGrid>
                     </Grid>
                 </ScrollViewer>
             </Border>
@@ -279,41 +242,53 @@
                     BorderBrush="#D6D0C4"
                     BorderThickness="1"
                     CornerRadius="6"
-                    Padding="10">
+                    Padding="8">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="8" />
+                        <RowDefinition Height="4" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="10" />
+                        <RowDefinition Height="8" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock FontWeight="SemiBold"
                                Foreground="#263746"
-                               Text="Draft Detail" />
-                    <TextBox Grid.Row="2"
-                             x:Name="DraftDetailTextBox"
-                             IsReadOnly="True"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             Padding="10"
-                             Background="#F8F6F1"
-                             BorderBrush="#E2DBCF"
-                             BorderThickness="1" />
+                               FontSize="12"
+                               Text="Detail" />
+                    <Border Grid.Row="2"
+                            Margin="0,0,0,2"
+                            Background="#F8F6F1"
+                            BorderBrush="#E2DBCF"
+                            BorderThickness="1"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      Padding="8">
+                            <TextBlock x:Name="DraftDetailTextBlock"
+                                       TextWrapping="Wrap"
+                                       Foreground="#000000" />
+                        </ScrollViewer>
+                    </Border>
                     <StackPanel Grid.Row="4"
                                 Orientation="Horizontal"
                                 HorizontalAlignment="Right">
+                        <Button x:Name="RejectOrDeleteButton"
+                                Width="90"
+                                Height="30"
+                                Margin="0,0,8,0"
+                                Click="RejectOrDeleteButton_OnClick"
+                                IsEnabled="False"
+                                Content="Remove" />
                         <Button x:Name="SqlPreviewButton"
                                 Width="96"
-                                Height="32"
+                                Height="30"
                                 Margin="0,0,8,0"
                                 Click="SqlPreviewButton_OnClick"
                                 IsEnabled="False"
                                 Content="SQL Preview" />
                         <Button x:Name="RunInsertButton"
                                 Width="92"
-                                Height="32"
+                                Height="30"
                                 Click="RunInsertButton_OnClick"
                                 IsEnabled="False"
                                 Background="#18344A"

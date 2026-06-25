@@ -85,9 +85,9 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="8" />
-                        <RowDefinition Height="*" MinHeight="140" />
+                        <RowDefinition x:Name="PolicyListRow" Height="*" MinHeight="140" />
                         <RowDefinition Height="8" />
-                        <RowDefinition Height="220" MinHeight="140" />
+                        <RowDefinition x:Name="ControlSelectionRow" Height="220" MinHeight="140" />
                     </Grid.RowDefinitions>
                     <StackPanel>
                         <TextBlock FontWeight="SemiBold"
@@ -99,6 +99,19 @@
                                    FontSize="11"
                                    Text="No domain selected." />
                     </StackPanel>
+                    <Button HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Width="32"
+                            Height="28"
+                            Padding="0"
+                            ToolTip="Delete selected policy version"
+                            Click="DeleteSelectedPolicyButton_OnClick">
+                        <TextBlock FontFamily="Segoe Fluent Icons"
+                                   FontSize="14"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Text="&#xE74D;" />
+                    </Button>
 
                     <DataGrid Grid.Row="2"
                               x:Name="PoliciesDataGrid"
@@ -109,6 +122,7 @@
                               HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal"
                               SelectionMode="Single"
+                              SelectionChanged="PoliciesDataGrid_OnSelectionChanged"
                               MouseDoubleClick="PoliciesDataGrid_OnMouseDoubleClick"
                               ItemsSource="{Binding Policies, RelativeSource={RelativeSource AncestorType=local:DomainPolicyWorkspaceTab}}">
                         <DataGrid.Columns>
@@ -147,8 +161,9 @@
                             BorderBrush="#E2DBCF"
                             BorderThickness="1"
                             CornerRadius="6"
+                            ClipToBounds="True"
                             Padding="10">
-                        <Grid>
+                        <Grid ClipToBounds="True">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="8" />
@@ -157,6 +172,8 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="8" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="8" />
                                     <ColumnDefinition Width="Auto" />
@@ -194,7 +211,7 @@
                                           DisplayMemberPath="DisplayName"
                                           SelectedValuePath="Code"
                                           ItemsSource="{Binding ControlGroupingModes, RelativeSource={RelativeSource AncestorType=local:DomainPolicyWorkspaceTab}}" />
-                                <Button Grid.Column="7"
+                                <Button Grid.Column="9"
                                         MinWidth="72"
                                         Height="28"
                                         Click="ClearControlsButton_OnClick"
@@ -206,6 +223,10 @@
                                      BorderThickness="0"
                                      Background="Transparent"
                                      SelectionMode="Extended"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ScrollViewer.CanContentScroll="True"
+                                     VirtualizingPanel.ScrollUnit="Pixel"
                                      PreviewKeyDown="SelectableControlsListBox_OnPreviewKeyDown"
                                      ItemsSource="{Binding SelectableControlsView, RelativeSource={RelativeSource AncestorType=local:DomainPolicyWorkspaceTab}}">
                                 <ListBox.GroupStyle>
@@ -262,7 +283,12 @@
                    x:Name="WorkspaceStatusTextBlock"
                    Margin="0,8,0,0"
                    Foreground="#5B6770"
-                   FontSize="12"
-                   Text="Policy workspace idle." />
+                   FontSize="12">
+            <Run x:Name="WorkspaceStatusBaseRun"
+                 Text="Policy workspace idle" />
+            <Run x:Name="WorkspaceStatusDotsRun"
+                 Foreground="#B22222"
+                 Text="." />
+        </TextBlock>
     </Grid>
 </UserControl>

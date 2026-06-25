@@ -114,6 +114,7 @@ public sealed class DomainItem : INotifyPropertyChanged
             if (SetField(ref _branchCollectionCount, value))
             {
                 OnPropertyChanged(nameof(TreeMetaText));
+                OnPropertyChanged(nameof(TreeMetaCollectionText));
             }
         }
     }
@@ -126,6 +127,7 @@ public sealed class DomainItem : INotifyPropertyChanged
             if (SetField(ref _branchPolicyCount, value))
             {
                 OnPropertyChanged(nameof(TreeMetaText));
+                OnPropertyChanged(nameof(TreeMetaPolicyText));
             }
         }
     }
@@ -138,6 +140,7 @@ public sealed class DomainItem : INotifyPropertyChanged
             if (SetField(ref _branchControlCount, value))
             {
                 OnPropertyChanged(nameof(TreeMetaText));
+                OnPropertyChanged(nameof(TreeMetaControlText));
             }
         }
     }
@@ -200,6 +203,15 @@ public sealed class DomainItem : INotifyPropertyChanged
             return parts.Count == 0 ? string.Empty : $"({string.Join("  ", parts)})";
         }
     }
+
+    [JsonIgnore]
+    public string TreeMetaCollectionText => BranchCollectionCount > 0 ? $"col:{BranchCollectionCount}" : string.Empty;
+
+    [JsonIgnore]
+    public string TreeMetaPolicyText => BranchPolicyCount > 0 ? $"pol:{BranchPolicyCount}" : string.Empty;
+
+    [JsonIgnore]
+    public string TreeMetaControlText => BranchControlCount > 0 ? $"ctl:{BranchControlCount}" : string.Empty;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -423,6 +435,7 @@ public sealed class ChatThreadItem : INotifyPropertyChanged
     private string _title = string.Empty;
     private CollectionItem? _parentCollection;
     private bool _isSelected;
+    private bool _isMultiSelected;
     private bool _isEditing;
 
     public string Title
@@ -441,6 +454,12 @@ public sealed class ChatThreadItem : INotifyPropertyChanged
     {
         get => _isSelected;
         set => SetField(ref _isSelected, value);
+    }
+
+    public bool IsMultiSelected
+    {
+        get => _isMultiSelected;
+        set => SetField(ref _isMultiSelected, value);
     }
 
     public bool IsEditing
@@ -662,8 +681,15 @@ public sealed class AiControlGroupingAssignmentResponse
 
 public sealed class AiControlGroupingResponse
 {
+    public List<PolicyDraftControlGroupingItem> Groups { get; set; } = [];
     public List<AiControlGroupingAssignmentResponse> Assignments { get; set; } = [];
     public AskResponseMetrics? Metrics { get; set; }
+}
+
+public sealed class PolicyDraftControlGroupingItem
+{
+    public string GroupLabel { get; set; } = string.Empty;
+    public List<string> ControlCodes { get; set; } = [];
 }
 
 public sealed class PromptPreviewResponse
@@ -772,6 +798,10 @@ public sealed class PolicyDraftSavedControlResponse
     public string DomainDisplayName { get; set; } = string.Empty;
     public string ControlTypeCode { get; set; } = string.Empty;
     public string ControlTypeName { get; set; } = string.Empty;
+    public string GroupLabel { get; set; } = string.Empty;
+    public int GroupDisplayOrder { get; set; }
+    public int ControlDisplayOrder { get; set; }
+    public string ControlExplanation { get; set; } = string.Empty;
     public List<PolicyDraftSavedStatementResponse> PolicyStatements { get; set; } = [];
 }
 
@@ -803,6 +833,9 @@ public sealed class PolicyDraftControlResponse
     public string DomainDisplayName { get; set; } = string.Empty;
     public string ControlTypeCode { get; set; } = string.Empty;
     public string ControlTypeName { get; set; } = string.Empty;
+    public string GroupLabel { get; set; } = string.Empty;
+    public int GroupDisplayOrder { get; set; }
+    public int ControlDisplayOrder { get; set; }
     public List<string> PolicyStatements { get; set; } = [];
 }
 
@@ -825,6 +858,15 @@ public sealed class SavedPolicyDraftResponse
     public string RootDomainCode { get; set; } = string.Empty;
     public string RootDomainName { get; set; } = string.Empty;
     public string ModelName { get; set; } = string.Empty;
+}
+
+public sealed class PolicyControlExplanationResponse
+{
+    public string PolicyId { get; set; } = string.Empty;
+    public string ControlCode { get; set; } = string.Empty;
+    public string ControlName { get; set; } = string.Empty;
+    public string ExplanationText { get; set; } = string.Empty;
+    public string SourceModelName { get; set; } = string.Empty;
 }
 
 public sealed class PolicyListItem

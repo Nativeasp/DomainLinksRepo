@@ -19,6 +19,7 @@ public partial class DocumentTextWindow : Window
         {
             Top = settings.DocumentTextWindowTop;
         }
+        UiScaleHelper.ApplyWindowScale(this, UiScaleHelper.Clamp(settings.AppUiScale));
         Title = title;
         HeaderTextBlock.Text = title;
         DocumentNameTextBox.Text = documentName;

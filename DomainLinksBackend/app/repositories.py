@@ -490,6 +490,61 @@ def create_control_from_suggestion(
     return _normalize_row(_row_to_dict(cursor, row))
 
 
+def delete_control(settings: Settings, control_id: str) -> dict[str, object]:
+    normalized_control_id = str(control_id or "").strip()
+    if not normalized_control_id:
+        raise ValueError("ControlId is required.")
+
+    with get_connection(settings) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SET NOCOUNT ON;
+
+            DECLARE @DeletedControl TABLE (
+                ControlId UNIQUEIDENTIFIER,
+                ControlCode NVARCHAR(100),
+                DisplayName NVARCHAR(255)
+            );
+
+            INSERT INTO @DeletedControl (ControlId, ControlCode, DisplayName)
+            SELECT ControlId, ControlCode, DisplayName
+            FROM dbo.Controls
+            WHERE ControlId = ?;
+
+            IF NOT EXISTS (SELECT 1 FROM @DeletedControl)
+            BEGIN
+                THROW 51000, 'Control was not found.', 1;
+            END;
+
+            DELETE FROM dbo.PolicyControlStatements
+            WHERE ControlId = ?;
+
+            DELETE FROM dbo.DomainControls
+            WHERE ControlId = ?;
+
+            DELETE FROM dbo.Controls
+            WHERE ControlId = ?;
+
+            SELECT ControlId, ControlCode, DisplayName
+            FROM @DeletedControl;
+            """,
+            [
+                normalized_control_id,
+                normalized_control_id,
+                normalized_control_id,
+                normalized_control_id,
+            ],
+        )
+        row = cursor.fetchone()
+        connection.commit()
+
+    if row is None:
+        raise ValueError("Control was not deleted.")
+
+    return _normalize_row(_row_to_dict(cursor, row))
+
+
 def get_domain_assist_context(settings: Settings, domain_code: str) -> dict[str, object]:
     normalized_code = _slug_code(domain_code)
     domains = list_domains(settings)
@@ -1016,6 +1071,89 @@ def get_policy_presentation_data(settings: Settings, policy_id: str) -> dict[str
     if not policy_row:
         raise ValueError(f"Policy not found for id '{policy_id}'.")
 
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        has_policy_control_group_label = _column_exists(cursor, "dbo.PolicyControlStatements", "GroupLabel")
+        has_policy_control_ordering = _column_exists(cursor, "dbo.PolicyControlStatements", "GroupDisplayOrder")
+
+    if has_policy_control_group_label and has_policy_control_ordering:
+        control_statements_query = """
+        SELECT
+            pcs.PolicyControlStatementId,
+            pcs.StatementText,
+            pcs.DisplayOrder,
+            pcs.ReviewStatus,
+            pcs.GroupLabel,
+            pcs.GroupDisplayOrder,
+            pcs.ControlDisplayOrder,
+            c.ControlCode,
+            c.DisplayName AS ControlName,
+            ct.CODE AS ControlTypeCode,
+            ct.NAME AS ControlTypeName
+        FROM dbo.PolicyControlStatements pcs
+        JOIN dbo.Controls c
+            ON c.ControlId = pcs.ControlId
+        JOIN dbo.ControlTypes ct
+            ON ct.ID = c.ControlTypeId
+        WHERE pcs.PolicyId = ?
+        ORDER BY
+            pcs.GroupDisplayOrder,
+            pcs.ControlDisplayOrder,
+            pcs.DisplayOrder,
+            pcs.PolicyControlStatementId
+        """
+    elif has_policy_control_group_label:
+        control_statements_query = """
+        SELECT
+            pcs.PolicyControlStatementId,
+            pcs.StatementText,
+            pcs.DisplayOrder,
+            pcs.ReviewStatus,
+            pcs.GroupLabel,
+            CAST(0 AS int) AS GroupDisplayOrder,
+            CAST(0 AS int) AS ControlDisplayOrder,
+            c.ControlCode,
+            c.DisplayName AS ControlName,
+            ct.CODE AS ControlTypeCode,
+            ct.NAME AS ControlTypeName
+        FROM dbo.PolicyControlStatements pcs
+        JOIN dbo.Controls c
+            ON c.ControlId = pcs.ControlId
+        JOIN dbo.ControlTypes ct
+            ON ct.ID = c.ControlTypeId
+        WHERE pcs.PolicyId = ?
+        ORDER BY
+            COALESCE(pcs.GroupLabel, ''),
+            c.DisplayName,
+            pcs.DisplayOrder,
+            pcs.PolicyControlStatementId
+        """
+    else:
+        control_statements_query = """
+        SELECT
+            pcs.PolicyControlStatementId,
+            pcs.StatementText,
+            pcs.DisplayOrder,
+            pcs.ReviewStatus,
+            CAST('' AS NVARCHAR(200)) AS GroupLabel,
+            CAST(0 AS int) AS GroupDisplayOrder,
+            CAST(0 AS int) AS ControlDisplayOrder,
+            c.ControlCode,
+            c.DisplayName AS ControlName,
+            ct.CODE AS ControlTypeCode,
+            ct.NAME AS ControlTypeName
+        FROM dbo.PolicyControlStatements pcs
+        JOIN dbo.Controls c
+            ON c.ControlId = pcs.ControlId
+        JOIN dbo.ControlTypes ct
+            ON ct.ID = c.ControlTypeId
+        WHERE pcs.PolicyId = ?
+        ORDER BY
+            c.DisplayName,
+            pcs.DisplayOrder,
+            pcs.PolicyControlStatementId
+        """
+
     sections = {
         "policy": _normalize_row(policy_row),
         "objectives": [
@@ -1143,29 +1281,146 @@ def get_policy_presentation_data(settings: Settings, policy_id: str) -> dict[str
             _normalize_row(row)
             for row in fetch_all(
                 settings,
-                """
-                SELECT
-                    pcs.PolicyControlStatementId,
-                    pcs.StatementText,
-                    pcs.DisplayOrder,
-                    pcs.ReviewStatus,
-                    c.ControlCode,
-                    c.DisplayName AS ControlName,
-                    ct.CODE AS ControlTypeCode,
-                    ct.NAME AS ControlTypeName
-                FROM dbo.PolicyControlStatements pcs
-                JOIN dbo.Controls c
-                    ON c.ControlId = pcs.ControlId
-                JOIN dbo.ControlTypes ct
-                    ON ct.ID = c.ControlTypeId
-                WHERE pcs.PolicyId = ?
-                ORDER BY c.DisplayName, pcs.DisplayOrder, pcs.PolicyControlStatementId
-                """,
+                control_statements_query,
                 [policy_id],
             )
         ],
+        "controlExplanations": list_policy_control_explanations(settings, policy_id),
     }
     return sections
+
+
+def list_policy_control_explanations(settings: Settings, policy_id: str) -> list[dict[str, object]]:
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        _ensure_policy_control_explanations_table(cursor)
+        cursor.execute(
+            """
+            SELECT
+                pce.PolicyId,
+                c.ControlCode,
+                c.DisplayName AS ControlName,
+                pce.ExplanationText,
+                pce.SourceModelName,
+                pce.CreatedAtUtc,
+                pce.UpdatedAtUtc
+            FROM dbo.PolicyControlExplanations pce
+            JOIN dbo.Controls c
+                ON c.ControlId = pce.ControlId
+            WHERE pce.PolicyId = ?
+            ORDER BY c.DisplayName
+            """,
+            [policy_id],
+        )
+        rows = [_normalize_row(_row_to_dict(cursor, row)) for row in cursor.fetchall()]
+    return rows
+
+
+def upsert_policy_control_explanation(
+    settings: Settings,
+    *,
+    policy_id: str,
+    control_code: str,
+    explanation_text: str,
+    source_model_name: str | None = None,
+) -> dict[str, object]:
+    normalized_policy_id = str(policy_id or "").strip()
+    normalized_control_code = _slug_code(control_code)
+    normalized_explanation = str(explanation_text or "").strip()
+    if not normalized_policy_id:
+        raise ValueError("PolicyId is required.")
+    if not normalized_control_code:
+        raise ValueError("ControlCode is required.")
+    if not normalized_explanation:
+        raise ValueError("Explanation text is required.")
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        _ensure_policy_control_explanations_table(cursor)
+        cursor.execute(
+            """
+            SELECT TOP 1 c.ControlId
+            FROM dbo.PolicyControlStatements pcs
+            JOIN dbo.Controls c
+                ON c.ControlId = pcs.ControlId
+            WHERE pcs.PolicyId = ?
+              AND c.ControlCode = ?;
+            """,
+            [
+                normalized_policy_id,
+                normalized_control_code,
+            ],
+        )
+        control_row = cursor.fetchone()
+        if control_row is None:
+            raise ValueError("Control is not linked to the specified policy.")
+
+        control_id = str(control_row[0])
+        cursor.execute(
+            """
+            UPDATE dbo.PolicyControlExplanations
+            SET
+                ExplanationText = ?,
+                SourceModelName = ?,
+                UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE PolicyId = ?
+              AND ControlId = ?;
+            """,
+            [
+                normalized_explanation,
+                source_model_name,
+                normalized_policy_id,
+                control_id,
+            ],
+        )
+        if cursor.rowcount == 0:
+            cursor.execute(
+                """
+                INSERT INTO dbo.PolicyControlExplanations (
+                    PolicyId,
+                    ControlId,
+                    ExplanationText,
+                    SourceModelName
+                )
+                VALUES (?, ?, ?, ?);
+                """,
+                [
+                    normalized_policy_id,
+                    control_id,
+                    normalized_explanation,
+                    source_model_name,
+                ],
+            )
+
+        cursor.execute(
+            """
+            SELECT
+                pce.PolicyId,
+                c.ControlCode,
+                c.DisplayName AS ControlName,
+                pce.ExplanationText,
+                pce.SourceModelName,
+                pce.CreatedAtUtc,
+                pce.UpdatedAtUtc
+            FROM dbo.PolicyControlExplanations pce
+            JOIN dbo.Controls c
+                ON c.ControlId = pce.ControlId
+            WHERE pce.PolicyId = ?
+              AND c.ControlId = ?;
+            """,
+            [
+                normalized_policy_id,
+                control_id,
+            ],
+        )
+        row = cursor.fetchone()
+        normalized_row = None if row is None else _normalize_row(_row_to_dict(cursor, row))
+        conn.commit()
+
+    if normalized_row is None:
+        raise ValueError("Policy control explanation was not saved.")
+
+    return normalized_row
 
 
 def get_latest_policy_for_root_domain(settings: Settings, root_domain_code: str) -> dict[str, object] | None:
@@ -1196,6 +1451,111 @@ def get_latest_policy_for_root_domain(settings: Settings, root_domain_code: str)
         return None
 
     return get_policy_presentation_data(settings, str(row.get("PolicyId") or ""))
+
+
+def delete_policy(settings: Settings, policy_id: str) -> dict[str, object]:
+    normalized_policy_id = (policy_id or "").strip()
+    if not normalized_policy_id:
+        raise ValueError("Policy id is required.")
+
+    with get_connection(settings) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT PolicyId, PolicyCode, PolicyTitle
+            FROM dbo.Policies
+            WHERE PolicyId = ?
+            """,
+            [normalized_policy_id],
+        )
+        policy_row = cursor.fetchone()
+        if policy_row is None:
+            raise ValueError(f"Policy not found for id '{policy_id}'.")
+
+        cursor.execute(
+            """
+            DELETE FROM dbo.PolicyPrincipleLinks
+            WHERE PolicyPrincipleId IN (
+                SELECT pp.PolicyPrincipleId
+                FROM dbo.PolicyPrinciples pp
+                JOIN dbo.PolicySections ps
+                    ON ps.PolicySectionId = pp.PolicySectionId
+                WHERE ps.PolicyId = ?
+            )
+            """,
+            [normalized_policy_id],
+        )
+        cursor.execute("DELETE FROM dbo.PolicyControlStatements WHERE PolicyId = ?", [normalized_policy_id])
+        cursor.execute(
+            """
+            DELETE po
+            FROM dbo.PolicyObjectives po
+            JOIN dbo.PolicySections ps
+                ON ps.PolicySectionId = po.PolicySectionId
+            WHERE ps.PolicyId = ?
+            """,
+            [normalized_policy_id],
+        )
+        cursor.execute(
+            """
+            DELETE pp
+            FROM dbo.PolicyPrinciples pp
+            JOIN dbo.PolicySections ps
+                ON ps.PolicySectionId = pp.PolicySectionId
+            WHERE ps.PolicyId = ?
+            """,
+            [normalized_policy_id],
+        )
+        cursor.execute(
+            """
+            DELETE pas
+            FROM dbo.PolicyAccountabilityStatements pas
+            JOIN dbo.PolicySections ps
+                ON ps.PolicySectionId = pas.PolicySectionId
+            WHERE ps.PolicyId = ?
+            """,
+            [normalized_policy_id],
+        )
+        cursor.execute(
+            """
+            DELETE pts
+            FROM dbo.PolicyTransparencyStatements pts
+            JOIN dbo.PolicySections ps
+                ON ps.PolicySectionId = pts.PolicySectionId
+            WHERE ps.PolicyId = ?
+            """,
+            [normalized_policy_id],
+        )
+        cursor.execute(
+            """
+            DELETE pss
+            FROM dbo.PolicyStrategyStatements pss
+            JOIN dbo.PolicySections ps
+                ON ps.PolicySectionId = pss.PolicySectionId
+            WHERE ps.PolicyId = ?
+            """,
+            [normalized_policy_id],
+        )
+        cursor.execute(
+            """
+            DELETE pc
+            FROM dbo.PolicyConsequences pc
+            JOIN dbo.PolicySections ps
+                ON ps.PolicySectionId = pc.PolicySectionId
+            WHERE ps.PolicyId = ?
+            """,
+            [normalized_policy_id],
+        )
+        cursor.execute("DELETE FROM dbo.PolicySections WHERE PolicyId = ?", [normalized_policy_id])
+        cursor.execute("DELETE FROM dbo.Policies WHERE PolicyId = ?", [normalized_policy_id])
+        conn.commit()
+
+    return {
+        "status": "deleted",
+        "policyId": normalized_policy_id,
+        "policyCode": str(policy_row.PolicyCode),
+        "policyTitle": str(policy_row.PolicyTitle),
+    }
 
 
 def reorder_root_domains(
@@ -2209,6 +2569,44 @@ def get_recent_context_units(
     return [_normalize_row(row) for row in rows]
 
 
+def list_context_units_for_collections(
+    settings: Settings,
+    collection_codes: list[str],
+) -> list[dict[str, object]]:
+    cleaned_codes = [_slug_code(code) for code in collection_codes if code.strip()]
+    if not cleaned_codes:
+        return []
+
+    placeholders = ", ".join("?" for _ in cleaned_codes)
+    rows = fetch_all(
+        settings,
+        f"""
+        SELECT
+            c.CollectionCode,
+            c.DisplayName AS CollectionDisplayName,
+            d.DocumentId,
+            d.SourceName,
+            cu.ContentUnitId,
+            cu.UnitType,
+            cu.UnitOrdinal,
+            cu.TokenCount,
+            cu.BodyText
+        FROM dbo.ContentUnits cu
+        JOIN dbo.Documents d
+            ON d.DocumentId = cu.DocumentId
+        JOIN dbo.Collections c
+            ON c.CollectionId = d.CollectionId
+        WHERE c.CollectionCode IN ({placeholders})
+          AND c.Status = 'Active'
+          AND d.Status = 'Active'
+          AND cu.Status = 'Active'
+        ORDER BY c.DisplayName, d.SourceName, cu.UnitOrdinal ASC
+        """,
+        cleaned_codes,
+    )
+    return [_normalize_row(row) for row in rows]
+
+
 def upsert_app_user(
     settings: Settings,
     windows_user_name: str,
@@ -2599,10 +2997,30 @@ def upsert_policy_draft(
     consequences: list[dict[str, object]],
     control_statements: list[dict[str, object]],
 ) -> dict[str, object]:
+    def _next_version_text(cursor, root_domain_id: object, normalized_title: str) -> str:
+        cursor.execute(
+            """
+            SELECT VersionText
+            FROM dbo.Policies
+            WHERE RootDomainId = ? AND PolicyTitle = ?
+            """,
+            [root_domain_id, normalized_title],
+        )
+        max_minor = 0
+        for row in cursor.fetchall():
+            raw_text = str(row.VersionText or "").strip()
+            match = re.match(r"^(\d+)\.(\d+)", raw_text)
+            if not match:
+                continue
+            if int(match.group(1)) != 0:
+                continue
+            max_minor = max(max_minor, int(match.group(2)))
+        return f"0.{max_minor + 1:02d}"
+
     normalized_root_domain_code = _slug_code(root_domain_code)
     normalized_policy_code = _slug_code(policy_code)
     normalized_status = status.strip() or "Draft"
-    normalized_version_text = version_text.strip() or "0.01"
+    normalized_version_text = version_text.strip() if version_text else ""
     normalized_policy_title = policy_title.strip()
     if not normalized_policy_title:
         raise ValueError("Policy title is required.")
@@ -2666,11 +3084,16 @@ def upsert_policy_draft(
                 "statementText": statement_text,
                 "displayOrder": int(row.get("displayOrder") or (index * 10)),
                 "reviewStatus": str(row.get("reviewStatus") or "Pending").strip() or "Pending",
+                "groupLabel": str(row.get("groupLabel") or "").strip(),
+                "groupDisplayOrder": int(row.get("groupDisplayOrder") or 0),
+                "controlDisplayOrder": int(row.get("controlDisplayOrder") or 0),
             }
         )
 
     with get_connection(settings) as conn:
         cursor = conn.cursor()
+        has_policy_control_group_label = _column_exists(cursor, "dbo.PolicyControlStatements", "GroupLabel")
+        has_policy_control_ordering = _column_exists(cursor, "dbo.PolicyControlStatements", "GroupDisplayOrder")
 
         cursor.execute(
             """
@@ -2685,6 +3108,7 @@ def upsert_policy_draft(
             raise ValueError(f"Active root domain not found for code '{root_domain_code}'.")
         root_domain_id = domain_row.DomainId
         root_domain_name = domain_row.DisplayName
+        normalized_version_text = _next_version_text(cursor, root_domain_id, normalized_policy_title)
 
         policy_template_id = None
         if template_code:
@@ -2744,69 +3168,31 @@ def upsert_policy_draft(
 
         cursor.execute(
             """
-            SELECT PolicyId
-            FROM dbo.Policies
-            WHERE PolicyCode = ?
+            INSERT INTO dbo.Policies (
+                RootDomainId,
+                PolicyTemplateId,
+                PolicyCode,
+                PolicyTitle,
+                VersionText,
+                Status,
+                TemplatePath,
+                SourceModelName
+            )
+            OUTPUT inserted.PolicyId
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [normalized_policy_code],
+            [
+                root_domain_id,
+                policy_template_id,
+                normalized_policy_code,
+                normalized_policy_title,
+                normalized_version_text,
+                normalized_status,
+                normalized_template_path,
+                source_model_name,
+            ],
         )
-        policy_row = cursor.fetchone()
-        if policy_row is None:
-            cursor.execute(
-                """
-                INSERT INTO dbo.Policies (
-                    RootDomainId,
-                    PolicyTemplateId,
-                    PolicyCode,
-                    PolicyTitle,
-                    VersionText,
-                    Status,
-                    TemplatePath,
-                    SourceModelName
-                )
-                OUTPUT inserted.PolicyId
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    root_domain_id,
-                    policy_template_id,
-                    normalized_policy_code,
-                    normalized_policy_title,
-                    normalized_version_text,
-                    normalized_status,
-                    normalized_template_path,
-                    source_model_name,
-                ],
-            )
-            policy_id = cursor.fetchone().PolicyId
-        else:
-            policy_id = policy_row.PolicyId
-            cursor.execute(
-                """
-                UPDATE dbo.Policies
-                SET
-                    RootDomainId = ?,
-                    PolicyTemplateId = ?,
-                    PolicyTitle = ?,
-                    VersionText = ?,
-                    Status = ?,
-                    TemplatePath = ?,
-                    SourceModelName = ?,
-                    UpdatedAtUtc = SYSUTCDATETIME(),
-                    UpdatedBy = SUSER_SNAME()
-                WHERE PolicyId = ?
-                """,
-                [
-                    root_domain_id,
-                    policy_template_id,
-                    normalized_policy_title,
-                    normalized_version_text,
-                    normalized_status,
-                    normalized_template_path,
-                    source_model_name,
-                    policy_id,
-                ],
-            )
+        policy_id = cursor.fetchone().PolicyId
 
         section_ids: dict[str, object] = {}
         for section_code, section_name, display_order in section_definitions:
@@ -3012,27 +3398,80 @@ def upsert_policy_draft(
                 raise ValueError(f"Control codes not found for policy control statements: {', '.join(sorted(set(missing_control_codes)))}.")
 
             for row in normalized_control_statements:
-                cursor.execute(
-                    """
-                    INSERT INTO dbo.PolicyControlStatements (
-                        PolicySectionId,
-                        PolicyId,
-                        ControlId,
-                        StatementText,
-                        DisplayOrder,
-                        ReviewStatus
+                if has_policy_control_group_label and has_policy_control_ordering:
+                    cursor.execute(
+                        """
+                        INSERT INTO dbo.PolicyControlStatements (
+                            PolicySectionId,
+                            PolicyId,
+                            ControlId,
+                            GroupLabel,
+                            GroupDisplayOrder,
+                            ControlDisplayOrder,
+                            StatementText,
+                            DisplayOrder,
+                            ReviewStatus
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            section_ids["CONTROL_POLICY"],
+                            policy_id,
+                            control_lookup[row["controlCode"]],
+                            row["groupLabel"] or None,
+                            row["groupDisplayOrder"],
+                            row["controlDisplayOrder"],
+                            row["statementText"],
+                            row["displayOrder"],
+                            row["reviewStatus"],
+                        ],
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    [
-                        section_ids["CONTROL_POLICY"],
-                        policy_id,
-                        control_lookup[row["controlCode"]],
-                        row["statementText"],
-                        row["displayOrder"],
-                        row["reviewStatus"],
-                    ],
-                )
+                elif has_policy_control_group_label:
+                    cursor.execute(
+                        """
+                        INSERT INTO dbo.PolicyControlStatements (
+                            PolicySectionId,
+                            PolicyId,
+                            ControlId,
+                            GroupLabel,
+                            StatementText,
+                            DisplayOrder,
+                            ReviewStatus
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            section_ids["CONTROL_POLICY"],
+                            policy_id,
+                            control_lookup[row["controlCode"]],
+                            row["groupLabel"] or None,
+                            row["statementText"],
+                            row["displayOrder"],
+                            row["reviewStatus"],
+                        ],
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO dbo.PolicyControlStatements (
+                            PolicySectionId,
+                            PolicyId,
+                            ControlId,
+                            StatementText,
+                            DisplayOrder,
+                            ReviewStatus
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            section_ids["CONTROL_POLICY"],
+                            policy_id,
+                            control_lookup[row["controlCode"]],
+                            row["statementText"],
+                            row["displayOrder"],
+                            row["reviewStatus"],
+                        ],
+                    )
 
         conn.commit()
 
@@ -3053,6 +3492,33 @@ def _normalize_row(row: dict[str, object]) -> dict[str, object]:
     for key, value in row.items():
         normalized[key] = str(value) if hasattr(value, "hex") and not isinstance(value, (bytes, bytearray, memoryview)) else value
     return normalized
+
+
+def _ensure_policy_control_explanations_table(cursor) -> None:
+    cursor.execute(
+        """
+        IF OBJECT_ID('dbo.PolicyControlExplanations', 'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.PolicyControlExplanations (
+                PolicyControlExplanationId UNIQUEIDENTIFIER NOT NULL
+                    CONSTRAINT DF_PolicyControlExplanations_Id DEFAULT (NEWSEQUENTIALID()),
+                PolicyId UNIQUEIDENTIFIER NOT NULL,
+                ControlId UNIQUEIDENTIFIER NOT NULL,
+                ExplanationText NVARCHAR(MAX) NOT NULL,
+                SourceModelName NVARCHAR(200) NULL,
+                CreatedAtUtc DATETIME2(0) NOT NULL
+                    CONSTRAINT DF_PolicyControlExplanations_CreatedAt DEFAULT (SYSUTCDATETIME()),
+                UpdatedAtUtc DATETIME2(0) NOT NULL
+                    CONSTRAINT DF_PolicyControlExplanations_UpdatedAt DEFAULT (SYSUTCDATETIME()),
+                CONSTRAINT PK_PolicyControlExplanations PRIMARY KEY (PolicyControlExplanationId),
+                CONSTRAINT UQ_PolicyControlExplanations_Policy_Control UNIQUE (PolicyId, ControlId)
+            );
+
+            CREATE INDEX IX_PolicyControlExplanations_PolicyId
+                ON dbo.PolicyControlExplanations(PolicyId);
+        END;
+        """
+    )
 
 
 def _row_to_dict(cursor, row: object) -> dict[str, object]:

@@ -20,6 +20,7 @@ public partial class TextPromptWindow : Window
         {
             Top = settings.TextPromptWindowTop;
         }
+        UiScaleHelper.ApplyWindowScale(this, UiScaleHelper.Clamp(settings.AppUiScale));
         Title = title;
         PromptTextBlock.Text = prompt;
         ValueTextBox.Text = initialValue;

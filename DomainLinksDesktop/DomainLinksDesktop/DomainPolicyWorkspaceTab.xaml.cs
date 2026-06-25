@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace DomainLinksDesktop;
 
@@ -16,8 +17,13 @@ public partial class DomainPolicyWorkspaceTab : UserControl
     private DomainItem? _selectedDomain;
     private bool _isActive;
     private bool _isSyncingControlSelection;
+    private bool _isLoadingPolicySelection;
     private string _selectedGroupingModeCode = "smart";
     private bool _isApplyingAiGrouping;
+    private List<PolicyDraftControlGroupingItem> _currentOrderedControlGroupings = [];
+    private readonly DispatcherTimer _groupingActivityTimer;
+    private int _groupingActivityFrame;
+    private string _groupingActivityBaseText = "Applying AI grouping...";
 
     public ObservableCollection<PolicyListItem> Policies { get; } = [];
     public ObservableCollection<SelectableControlItem> SelectableControls { get; } = [];
@@ -35,6 +41,11 @@ public partial class DomainPolicyWorkspaceTab : UserControl
     {
         InitializeComponent();
         DataContext = this;
+        _groupingActivityTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(280)
+        };
+        _groupingActivityTimer.Tick += GroupingActivityTimer_OnTick;
         SelectableControlsView = CollectionViewSource.GetDefaultView(SelectableControls);
         DraftTabContent.IncludedControlCodesChanged += DraftTabContent_OnIncludedControlCodesChanged;
         Loaded += DomainPolicyWorkspaceTab_OnLoaded;
@@ -42,6 +53,8 @@ public partial class DomainPolicyWorkspaceTab : UserControl
 
     private async void DomainPolicyWorkspaceTab_OnLoaded(object sender, RoutedEventArgs e)
     {
+        ApplyLayoutSettings();
+
         if (ControlGroupingComboBox.SelectedValue is null)
         {
             ControlGroupingComboBox.SelectedValue = _selectedGroupingModeCode;
@@ -58,6 +71,37 @@ public partial class DomainPolicyWorkspaceTab : UserControl
             BaseAddress = new Uri(settings.BackendBaseUrl)
         };
         DraftTabContent.Configure(settings);
+
+        if (IsLoaded)
+        {
+            ApplyLayoutSettings();
+        }
+    }
+
+    internal double PoliciesPaneWidth => WorkspacePoliciesColumn.ActualWidth > WorkspacePoliciesColumn.MinWidth
+        ? WorkspacePoliciesColumn.ActualWidth
+        : _settings?.PolicyWorkspacePoliciesPaneWidth ?? 430;
+
+    internal double ControlSelectionPaneHeight => ControlSelectionRow.ActualHeight > ControlSelectionRow.MinHeight
+        ? ControlSelectionRow.ActualHeight
+        : _settings?.PolicyWorkspaceControlSelectionPaneHeight ?? 220;
+
+    private void ApplyLayoutSettings()
+    {
+        if (_settings is null)
+        {
+            return;
+        }
+
+        if (_settings.PolicyWorkspacePoliciesPaneWidth > 0)
+        {
+            WorkspacePoliciesColumn.Width = new GridLength(_settings.PolicyWorkspacePoliciesPaneWidth);
+        }
+
+        if (_settings.PolicyWorkspaceControlSelectionPaneHeight > 0)
+        {
+            ControlSelectionRow.Height = new GridLength(_settings.PolicyWorkspaceControlSelectionPaneHeight);
+        }
     }
 
     public void SetSelectedDomain(DomainItem? domain)
@@ -85,7 +129,36 @@ public partial class DomainPolicyWorkspaceTab : UserControl
     public void Deactivate()
     {
         _isActive = false;
+        StopGroupingActivity();
         DraftTabContent.Deactivate();
+    }
+
+    private void GroupingActivityTimer_OnTick(object? sender, EventArgs e)
+    {
+        var frames = new[] { ".", "..", "...", "...." };
+        SetWorkspaceStatus(_groupingActivityBaseText, frames[_groupingActivityFrame % frames.Length]);
+        _groupingActivityFrame++;
+    }
+
+    private void StartGroupingActivity(string baseText)
+    {
+        _groupingActivityFrame = 0;
+        _groupingActivityBaseText = string.IsNullOrWhiteSpace(baseText)
+            ? "Applying AI grouping"
+            : baseText.Trim().TrimEnd('.');
+        SetWorkspaceStatus(_groupingActivityBaseText, ".");
+        _groupingActivityTimer.Start();
+    }
+
+    private void StopGroupingActivity()
+    {
+        _groupingActivityTimer.Stop();
+    }
+
+    private void SetWorkspaceStatus(string text, string dots = "")
+    {
+        WorkspaceStatusBaseRun.Text = text;
+        WorkspaceStatusDotsRun.Text = dots;
     }
 
     private async void DraftPolicyButton_OnClick(object sender, RoutedEventArgs e)
@@ -107,6 +180,7 @@ public partial class DomainPolicyWorkspaceTab : UserControl
         {
             SetBusyState(true);
             await DraftTabContent.ExecuteSaveDraftAsync();
+            await LoadPoliciesAsync(force: true);
         }
         finally
         {
@@ -221,6 +295,85 @@ public partial class DomainPolicyWorkspaceTab : UserControl
         window.ShowDialog();
     }
 
+    private async void PoliciesDataGrid_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoadingPolicySelection || PoliciesDataGrid.SelectedItem is not PolicyListItem policy)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(policy.PolicyId))
+        {
+            return;
+        }
+
+        try
+        {
+            _isLoadingPolicySelection = true;
+            SetBusyState(true, $"Loading {policy.PolicyTitle} ({policy.VersionText})...");
+            var payload = await DraftTabContent.LoadPolicyByIdAsync(policy.PolicyId);
+            if (payload is null)
+            {
+                return;
+            }
+
+            ApplyLoadedPolicyToControls(payload);
+            SetWorkspaceStatus($"Loaded {policy.PolicyTitle} ({policy.VersionText}) for editing.");
+        }
+        catch (Exception ex)
+        {
+            SetWorkspaceStatus($"Policy load failed: {ex.Message}");
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Policy Workspace", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _isLoadingPolicySelection = false;
+            SetBusyState(false);
+        }
+    }
+
+    private async void DeleteSelectedPolicyButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_httpClient is null || PoliciesDataGrid.SelectedItem is not PolicyListItem policy)
+        {
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            Window.GetWindow(this),
+            $"Delete saved policy version {policy.VersionText} for \"{policy.PolicyTitle}\"?",
+            "Delete Policy",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            SetBusyState(true, $"Deleting {policy.PolicyTitle} ({policy.VersionText})...");
+            var response = await _httpClient.DeleteAsync($"/policies/{Uri.EscapeDataString(policy.PolicyId)}");
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
+            }
+
+            await LoadPoliciesAsync(force: true);
+            SetWorkspaceStatus($"Deleted {policy.PolicyTitle} ({policy.VersionText}).");
+        }
+        catch (Exception ex)
+        {
+            SetWorkspaceStatus($"Policy delete failed: {ex.Message}");
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Delete Policy", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusyState(false);
+        }
+    }
+
     private async Task LoadPoliciesAsync(bool force)
     {
         if (_httpClient is null)
@@ -232,7 +385,7 @@ public partial class DomainPolicyWorkspaceTab : UserControl
         {
             Policies.Clear();
             UpdateSummary();
-            WorkspaceStatusTextBlock.Text = "Select a domain to load policies.";
+            SetWorkspaceStatus("Select a domain to load policies.");
             return;
         }
 
@@ -253,13 +406,13 @@ public partial class DomainPolicyWorkspaceTab : UserControl
             }
 
             UpdateSummary();
-            WorkspaceStatusTextBlock.Text = Policies.Count == 0
+            SetWorkspaceStatus(Policies.Count == 0
                 ? $"No saved policies found for {_selectedDomain.DisplayName}."
-                : $"Loaded {Policies.Count} saved policies for {_selectedDomain.DisplayName}.";
+                : $"Loaded {Policies.Count} saved policies for {_selectedDomain.DisplayName}.");
         }
         catch (Exception ex)
         {
-            WorkspaceStatusTextBlock.Text = $"Policy workspace load failed: {ex.Message}";
+            SetWorkspaceStatus($"Policy workspace load failed: {ex.Message}");
             MessageBox.Show(Window.GetWindow(this), ex.Message, "Policy Workspace", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -285,6 +438,7 @@ public partial class DomainPolicyWorkspaceTab : UserControl
         if (_selectedDomain is null || string.IsNullOrWhiteSpace(_selectedDomain.DomainCode))
         {
             DraftTabContent.SetIncludedControlCodes([]);
+            DraftTabContent.SetControlGroupings([]);
             UpdateSummary();
             return;
         }
@@ -319,7 +473,7 @@ public partial class DomainPolicyWorkspaceTab : UserControl
         }
         catch (Exception ex)
         {
-            WorkspaceStatusTextBlock.Text = $"Control load failed: {ex.Message}";
+            SetWorkspaceStatus($"Control load failed: {ex.Message}");
             MessageBox.Show(Window.GetWindow(this), ex.Message, "Policy Workspace", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -344,6 +498,64 @@ public partial class DomainPolicyWorkspaceTab : UserControl
             : $"{selectedControlCount} of {SelectableControls.Count} controls selected for this policy.";
     }
 
+    private void ApplyLoadedPolicyToControls(LoadedPolicyDraftResponse payload)
+    {
+        var includedCodes = new HashSet<string>(
+            payload.Controls.Select(item => item.ControlCode),
+            StringComparer.OrdinalIgnoreCase);
+        var groupLabelByCode = payload.Controls
+            .Where(item => !string.IsNullOrWhiteSpace(item.ControlCode))
+            .ToDictionary(
+                item => item.ControlCode,
+                item => item.GroupLabel ?? string.Empty,
+                StringComparer.OrdinalIgnoreCase);
+
+        _isSyncingControlSelection = true;
+        try
+        {
+            foreach (var item in SelectableControls)
+            {
+                item.IsIncluded = includedCodes.Contains(item.ControlCode);
+                item.GroupLabel = groupLabelByCode.TryGetValue(item.ControlCode, out var label)
+                    ? label
+                    : string.Empty;
+            }
+        }
+        finally
+        {
+            _isSyncingControlSelection = false;
+        }
+
+        _currentOrderedControlGroupings = payload.Controls
+            .OrderBy(item => item.GroupDisplayOrder)
+            .ThenBy(item => item.ControlDisplayOrder)
+            .ThenBy(item => item.ControlName, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(
+                item => string.IsNullOrWhiteSpace(item.GroupLabel) ? "Ungrouped Controls" : item.GroupLabel,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PolicyDraftControlGroupingItem
+            {
+                GroupLabel = group.Key,
+                ControlCodes = group
+                    .Select(item => item.ControlCode)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+            })
+            .ToList();
+
+        ReorderSelectableControlsByCurrentGrouping();
+
+        using (SelectableControlsView.DeferRefresh())
+        {
+            SelectableControlsView.GroupDescriptions.Clear();
+            SelectableControlsView.GroupDescriptions.Add(
+                new PropertyGroupDescription(nameof(SelectableControlItem.GroupLabel)));
+        }
+
+        PushSelectedControlsToDraft();
+        UpdateSummary();
+    }
+
     private void SetBusyState(bool isBusy, string? statusText = null)
     {
         DraftPolicyButton.IsEnabled = !isBusy;
@@ -352,7 +564,7 @@ public partial class DomainPolicyWorkspaceTab : UserControl
         ControlGroupingComboBox.IsEnabled = !isBusy;
         if (!string.IsNullOrWhiteSpace(statusText))
         {
-            WorkspaceStatusTextBlock.Text = statusText;
+            SetWorkspaceStatus(statusText);
         }
     }
 
@@ -389,10 +601,52 @@ public partial class DomainPolicyWorkspaceTab : UserControl
 
     private void PushSelectedControlsToDraft()
     {
-        DraftTabContent.SetIncludedControlCodes(
-            SelectableControls
-                .Where(item => item.IsIncluded)
-                .Select(item => item.ControlCode));
+        var includedControls = SelectableControls
+            .Where(item => item.IsIncluded)
+            .ToList();
+
+        DraftTabContent.SetIncludedControlCodes(includedControls.Select(item => item.ControlCode));
+        var includedCodes = new HashSet<string>(
+            includedControls.Select(item => item.ControlCode),
+            StringComparer.OrdinalIgnoreCase);
+
+        var orderedGroupings = new List<PolicyDraftControlGroupingItem>();
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var grouping in _currentOrderedControlGroupings)
+        {
+            var groupCodes = (grouping.ControlCodes ?? [])
+                .Where(code => includedCodes.Contains(code))
+                .Where(code => seenCodes.Add(code))
+                .ToList();
+            if (groupCodes.Count == 0)
+            {
+                continue;
+            }
+
+            orderedGroupings.Add(new PolicyDraftControlGroupingItem
+            {
+                GroupLabel = string.IsNullOrWhiteSpace(grouping.GroupLabel) ? "Ungrouped Controls" : grouping.GroupLabel,
+                ControlCodes = groupCodes,
+            });
+        }
+
+        var leftovers = includedControls
+            .Where(item => seenCodes.Add(item.ControlCode))
+            .GroupBy(
+                item => string.IsNullOrWhiteSpace(item.GroupLabel) ? "Ungrouped Controls" : item.GroupLabel,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PolicyDraftControlGroupingItem
+            {
+                GroupLabel = group.Key,
+                ControlCodes = group
+                    .Select(item => item.ControlCode)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+            });
+
+        orderedGroupings.AddRange(leftovers);
+        DraftTabContent.SetControlGroupings(orderedGroupings);
     }
 
     private void SetAllControlsIncluded(bool isIncluded)
@@ -458,6 +712,22 @@ public partial class DomainPolicyWorkspaceTab : UserControl
             item.GroupLabel = ResolveGroupLabel(item, _selectedGroupingModeCode);
         }
 
+        _currentOrderedControlGroupings = SelectableControls
+            .GroupBy(
+                item => string.IsNullOrWhiteSpace(item.GroupLabel) ? "Ungrouped Controls" : item.GroupLabel,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PolicyDraftControlGroupingItem
+            {
+                GroupLabel = group.Key,
+                ControlCodes = group
+                    .Select(item => item.ControlCode)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+            })
+            .ToList();
+
+        ReorderSelectableControlsByCurrentGrouping();
+
         using (SelectableControlsView.DeferRefresh())
         {
             SelectableControlsView.GroupDescriptions.Clear();
@@ -467,6 +737,8 @@ public partial class DomainPolicyWorkspaceTab : UserControl
                     new PropertyGroupDescription(nameof(SelectableControlItem.GroupLabel)));
             }
         }
+
+        PushSelectedControlsToDraft();
     }
 
     private async Task ApplyAiGroupingAsync()
@@ -479,8 +751,9 @@ public partial class DomainPolicyWorkspaceTab : UserControl
         try
         {
             _isApplyingAiGrouping = true;
-            WorkspaceStatusTextBlock.Text = $"Applying AI grouping for {_selectedDomain.DisplayName}...";
+            SetWorkspaceStatus($"Applying AI grouping for {_selectedDomain.DisplayName}", "...");
             ControlGroupingComboBox.IsEnabled = false;
+            StartGroupingActivity($"Applying AI grouping for {_selectedDomain.DisplayName}");
 
             var response = await _httpClient.PostAsJsonAsync(
                 "/controls/grouping/ai",
@@ -494,6 +767,7 @@ public partial class DomainPolicyWorkspaceTab : UserControl
 
             var payload = await response.Content.ReadFromJsonAsync<AiControlGroupingResponse>();
             var assignments = payload?.Assignments ?? [];
+            var groups = payload?.Groups ?? [];
             var labelsByCode = assignments
                 .Where(item => !string.IsNullOrWhiteSpace(item.ControlCode))
                 .GroupBy(item => item.ControlCode, StringComparer.OrdinalIgnoreCase)
@@ -509,6 +783,21 @@ public partial class DomainPolicyWorkspaceTab : UserControl
                     : BuildSmartGroupLabel(item);
             }
 
+            _currentOrderedControlGroupings = groups
+                .Where(group => group is not null)
+                .Select(group => new PolicyDraftControlGroupingItem
+                {
+                    GroupLabel = string.IsNullOrWhiteSpace(group.GroupLabel) ? "Other Controls" : group.GroupLabel,
+                    ControlCodes = (group.ControlCodes ?? [])
+                        .Where(code => !string.IsNullOrWhiteSpace(code))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList()
+                })
+                .Where(group => group.ControlCodes.Count > 0)
+                .ToList();
+
+            ReorderSelectableControlsByCurrentGrouping();
+
             using (SelectableControlsView.DeferRefresh())
             {
                 SelectableControlsView.GroupDescriptions.Clear();
@@ -516,7 +805,8 @@ public partial class DomainPolicyWorkspaceTab : UserControl
                     new PropertyGroupDescription(nameof(SelectableControlItem.GroupLabel)));
             }
 
-            WorkspaceStatusTextBlock.Text = $"Applied AI grouping to {SelectableControls.Count} controls.";
+            SetWorkspaceStatus($"Applied AI grouping to {SelectableControls.Count} controls.");
+            PushSelectedControlsToDraft();
         }
         catch (Exception ex)
         {
@@ -525,6 +815,20 @@ public partial class DomainPolicyWorkspaceTab : UserControl
                 item.GroupLabel = BuildSmartGroupLabel(item);
             }
 
+            _currentOrderedControlGroupings = SelectableControls
+                .GroupBy(item => item.GroupLabel, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new PolicyDraftControlGroupingItem
+                {
+                    GroupLabel = group.Key,
+                    ControlCodes = group
+                        .Select(item => item.ControlCode)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList()
+                })
+                .ToList();
+
+            ReorderSelectableControlsByCurrentGrouping();
+
             using (SelectableControlsView.DeferRefresh())
             {
                 SelectableControlsView.GroupDescriptions.Clear();
@@ -532,11 +836,13 @@ public partial class DomainPolicyWorkspaceTab : UserControl
                     new PropertyGroupDescription(nameof(SelectableControlItem.GroupLabel)));
             }
 
-            WorkspaceStatusTextBlock.Text = $"AI grouping failed, using local smart grouping: {ex.Message}";
+            SetWorkspaceStatus($"AI grouping failed, using local smart grouping: {ex.Message}");
+            PushSelectedControlsToDraft();
         }
         finally
         {
             _isApplyingAiGrouping = false;
+            StopGroupingActivity();
             ControlGroupingComboBox.IsEnabled = true;
         }
     }
@@ -550,6 +856,53 @@ public partial class DomainPolicyWorkspaceTab : UserControl
             "smart" => BuildSmartGroupLabel(item),
             _ => string.Empty,
         };
+    }
+
+    private void ReorderSelectableControlsByCurrentGrouping()
+    {
+        if (SelectableControls.Count <= 1)
+        {
+            return;
+        }
+
+        var controlByCode = SelectableControls
+            .Where(item => !string.IsNullOrWhiteSpace(item.ControlCode))
+            .GroupBy(item => item.ControlCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        var orderedItems = new List<SelectableControlItem>();
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var grouping in _currentOrderedControlGroupings)
+        {
+            foreach (var code in grouping.ControlCodes ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(code) || !seenCodes.Add(code))
+                {
+                    continue;
+                }
+
+                if (controlByCode.TryGetValue(code, out var item))
+                {
+                    orderedItems.Add(item);
+                }
+            }
+        }
+
+        orderedItems.AddRange(
+            SelectableControls
+                .Where(item => string.IsNullOrWhiteSpace(item.ControlCode) || seenCodes.Add(item.ControlCode)));
+
+        if (orderedItems.Count != SelectableControls.Count)
+        {
+            return;
+        }
+
+        SelectableControls.Clear();
+        foreach (var item in orderedItems)
+        {
+            SelectableControls.Add(item);
+        }
     }
 
     private static string BuildSmartGroupLabel(SelectableControlItem item)

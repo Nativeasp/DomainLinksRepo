@@ -49,17 +49,18 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<CollectionItem> _projectCollections = [];
     private readonly ObservableCollection<DomainItem> _capabilityDomains = [];
     private readonly ObservableCollection<ModelOptionItem> _availableModels = [];
-    private readonly ObservableCollection<RetrievalModeItem> _retrievalModes =
-    [
-        new RetrievalModeItem { Code = "FullContext", DisplayName = "Full Context", Description = "Use the current recency-based context assembly." },
-        new RetrievalModeItem { Code = "VectorRag", DisplayName = "Vector RAG", Description = "Use semantic chunk retrieval within the selected collections." },
-        new RetrievalModeItem { Code = "Hybrid", DisplayName = "Hybrid", Description = "Blend vector retrieval with the current recency context." },
-    ];
     private readonly DispatcherTimer _contextPreviewTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private readonly MarkdownPipeline _markdownPipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
     private readonly LocalChatStore _localChatStore = new();
+    private readonly List<ChatThreadItem> _selectedChatThreads = [];
+    private readonly GridLength _defaultPromptInputRowHeight = new(160);
+    private readonly GridLength _defaultWorkingPaneHeaderSpacerRowHeight = new(12);
+    private readonly GridLength _defaultPromptSplitterRowHeight = new(8);
+    private readonly GridLength _defaultWorkPanelTopSpacerRowHeight = new(12);
+    private double _appUiScale;
     private bool _isUpdatingContextSelection;
     private bool _isTopPanelExpanded;
+    private bool _isThreadPanelExpanded;
     private bool _isStreamingResponseActive;
     private bool _isRefreshingContextPreview;
     private CollectionItem? _activeProjectCollection;
@@ -83,6 +84,8 @@ public partial class MainWindow : Window
         {
             Top = _settings.WindowTop;
         }
+        _appUiScale = UiScaleHelper.Clamp(_settings.AppUiScale);
+        UiScaleHelper.ApplyWindowScale(this, _appUiScale);
         _httpClient = new HttpClient
         {
             BaseAddress = new Uri(_settings.BackendBaseUrl)
@@ -95,16 +98,13 @@ public partial class MainWindow : Window
         ProjectCollectionsTreeView.ItemsSource = _projectCollections;
         DomainContextTreeView.ItemsSource = _capabilityDomains;
         ModelComboBox.ItemsSource = _availableModels;
-        RetrievalModeComboBox.ItemsSource = _retrievalModes;
-        RetrievalModeComboBox.SelectedValue = string.IsNullOrWhiteSpace(_settings.LastSelectedRetrievalMode)
-            ? "FullContext"
-            : _settings.LastSelectedRetrievalMode;
-        RetrievalModeComboBox.SelectionChanged += RetrievalModeComboBox_OnSelectionChanged;
         _contextPreviewTimer.Tick += ContextPreviewTimer_OnTick;
         Loaded += MainWindow_OnLoaded;
         Closing += MainWindow_OnClosing;
         PreviewKeyDown += MainWindow_OnPreviewKeyDown;
         UpdateTopPanelState();
+        UpdateThreadPanelState();
+        UpdateContextOptionState();
         UpdatePromptPlaceholderVisibility();
     }
 
@@ -114,6 +114,7 @@ public partial class MainWindow : Window
         RightPaneColumn.Width = new GridLength(_settings.RightPaneWidth);
         PromptInputRow.Height = new GridLength(_settings.PromptPaneHeight);
         await EnsureWebViewReadyAsync(ShellMenuWebView);
+        UiScaleHelper.ApplyWebViewScale(ShellMenuWebView, _appUiScale);
         ShellMenuWebView.CoreWebView2.Settings.IsWebMessageEnabled = true;
         ShellMenuWebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
         ShellMenuWebView.CoreWebView2.WebMessageReceived += ShellMenuWebView_OnWebMessageReceived;
@@ -123,6 +124,7 @@ public partial class MainWindow : Window
             CoreWebView2HostResourceAccessKind.DenyCors);
         ShellMenuWebView.Source = new Uri($"https://{ShellHostName}/WebShell/menu-host.html");
         await EnsureWebViewReadyAsync(ResponseWebView);
+        UiScaleHelper.ApplyWebViewScale(ResponseWebView, _appUiScale);
         ResponseWebView.CoreWebView2.Settings.IsWebMessageEnabled = true;
         ResponseWebView.CoreWebView2.WebMessageReceived += ResponseWebView_OnWebMessageReceived;
         ShowEmptyResponseState("Response output will appear here.");
@@ -168,8 +170,8 @@ public partial class MainWindow : Window
             LeftPaneWidth = LeftPaneColumn.ActualWidth,
             RightPaneWidth = RightPaneColumn.ActualWidth,
             PromptPaneHeight = PromptInputRow.ActualHeight,
+            AppUiScale = _appUiScale,
             LastSelectedModel = ModelComboBox.SelectedValue as string ?? string.Empty,
-            LastSelectedRetrievalMode = RetrievalModeComboBox.SelectedValue as string ?? "FullContext",
         };
         saved.Save();
     }
@@ -674,6 +676,22 @@ public partial class MainWindow : Window
         await PromptRenameThreadAsync(thread);
     }
 
+    private async void MergeSelectedChatsMenuItem_OnClick(object sender, RoutedEventArgs e)
+    {
+        var thread = ResolveThreadFromMenuSender(sender);
+        if (thread is null)
+        {
+            return;
+        }
+
+        if (!_selectedChatThreads.Contains(thread))
+        {
+            SetSingleMultiSelection(thread);
+        }
+
+        await MergeSelectedChatsAsync();
+    }
+
     private async void DeleteChildMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
         var thread = ResolveThreadFromMenuSender(sender);
@@ -688,6 +706,29 @@ public partial class MainWindow : Window
         _activeProjectCollection = thread.ParentCollection;
         SelectTreeItem(thread);
         await DeleteChatThreadAsync(thread);
+    }
+
+    private void ChildThreadNode_OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ChatThreadItem thread)
+        {
+            return;
+        }
+
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
+        {
+            SetSingleMultiSelection(thread);
+            return;
+        }
+
+        ToggleMultiSelection(thread);
+        e.Handled = true;
+
+        if (GetTreeViewItem(ProjectCollectionsTreeView, thread) is { } container)
+        {
+            container.IsSelected = true;
+            container.Focus();
+        }
     }
 
     private async void AiRenameRootMenuItem_OnClick(object sender, RoutedEventArgs e)
@@ -812,6 +853,7 @@ public partial class MainWindow : Window
         switch (e.NewValue)
         {
             case CollectionItem collection:
+                ClearMultiSelection();
                 ClearProjectSelectionFlags();
                 collection.IsSelected = true;
                 _activeProjectCollection = collection;
@@ -857,6 +899,30 @@ public partial class MainWindow : Window
         if (e.Handled)
         {
             return;
+        }
+
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            if (e.Key is Key.OemPlus or Key.Add)
+            {
+                AdjustUiScale(UiScaleHelper.ScaleStep);
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key is Key.OemMinus or Key.Subtract)
+            {
+                AdjustUiScale(-UiScaleHelper.ScaleStep);
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key == Key.D0 || e.Key == Key.NumPad0)
+            {
+                ResetUiScale();
+                e.Handled = true;
+                return;
+            }
         }
 
         if (e.Key is not (Key.Delete or Key.Back))
@@ -979,7 +1045,7 @@ public partial class MainWindow : Window
             var provisionalThreadTitle = BuildTemporaryThreadTitle(promptText);
 
             var selectedModel = ModelComboBox.SelectedValue as string;
-            var selectedRetrievalMode = RetrievalModeComboBox.SelectedValue as string ?? "FullContext";
+            var selectedRetrievalMode = GetSelectedRetrievalMode();
             var startedAtUtc = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
 
@@ -1043,6 +1109,12 @@ public partial class MainWindow : Window
                 shortMemoryCollectionCode = shortMemoryCollection.CollectionCode,
                 longTermCollectionCodes = longTermCollections,
                 retrievalMode = selectedRetrievalMode,
+                selectedDomainCode = ResolveSelectedDomainCodeForChatContext(),
+                includeDocuments = IncludeDocumentsCheckBox.IsChecked == true,
+                includeRag = IncludeRagCheckBox.IsChecked == true,
+                includePolicies = IncludePoliciesCheckBox.IsChecked == true,
+                includeDomainContext = IncludeDomainContextCheckBox.IsChecked == true,
+                includeControls = IncludeControlsCheckBox.IsChecked == true,
                 model = selectedModel,
                 history = thread.Messages
                     .Take(Math.Max(0, thread.Messages.Count - 2))
@@ -1410,6 +1482,7 @@ public partial class MainWindow : Window
         }
 
         var parent = thread.ParentCollection;
+        _selectedChatThreads.Remove(thread);
         parent.Threads.Remove(thread);
         _activeProjectCollection = parent;
         _activeChatThread = null;
@@ -1453,6 +1526,59 @@ public partial class MainWindow : Window
         {
             ShowEmptyResponseState($"Renamed chat to: {thread.Title}");
         }
+    }
+
+    private async Task MergeSelectedChatsAsync()
+    {
+        var threads = _selectedChatThreads
+            .Where(thread => thread.ParentCollection is not null)
+            .Distinct()
+            .ToList();
+
+        if (threads.Count < 2)
+        {
+            ShowEmptyResponseState("Ctrl+select at least two chats in the same project, then merge them.");
+            return;
+        }
+
+        var target = threads[0];
+        var parent = target.ParentCollection;
+        if (parent is null || threads.Any(thread => !ReferenceEquals(thread.ParentCollection, parent)))
+        {
+            ShowEmptyResponseState("Only chats from the same project can be merged together.");
+            return;
+        }
+
+        var mergeTitles = string.Join(", ", threads.Skip(1).Select(thread => thread.Title));
+        var confirmation = MessageBox.Show(
+            this,
+            $"Merge {threads.Count} chats into '{target.Title}'?{Environment.NewLine}{Environment.NewLine}Merged in order: {string.Join(" -> ", threads.Select(thread => thread.Title))}{Environment.NewLine}{Environment.NewLine}These chats will be removed after their messages are appended.",
+            "Merge Chats",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        foreach (var thread in threads.Skip(1))
+        {
+            foreach (var message in thread.Messages)
+            {
+                target.Messages.Add(CloneChatMessage(message));
+            }
+        }
+
+        foreach (var thread in threads.Skip(1).ToList())
+        {
+            parent.Threads.Remove(thread);
+        }
+
+        ClearMultiSelection();
+        ActivateChatThread(target);
+        await PersistCollectionChatsAsync(parent);
+        await ShowChatThreadStateAsync(target);
+        SetUploadFeedback($"Merged {threads.Count} chats into '{target.Title}'.", Brushes.DarkGreen);
     }
 
     private async void UploadButton_OnClick(object sender, RoutedEventArgs e)
@@ -1906,14 +2032,23 @@ public partial class MainWindow : Window
 
     private void UpdateIncludedContextSummary()
     {
+        if (IncludedContextTextBlock is null)
+        {
+            return;
+        }
+
         var includedCollections = EnumerateCapabilityCollections(_capabilityDomains)
             .Where(collection => collection.IsIncluded)
             .Select(collection => $"{collection.DomainDisplayName} / {collection.DisplayName}")
             .ToList();
+        var enabledSources = GetEnabledContextSources();
+        var sourceSummary = enabledSources.Count == 0
+            ? "No context sources selected"
+            : $"Context sources: {string.Join(", ", enabledSources)}";
 
         IncludedContextTextBlock.Text = includedCollections.Count == 0
-            ? "No capability domains selected."
-            : $"Included capability context: {string.Join("; ", includedCollections)}";
+            ? sourceSummary
+            : $"{sourceSummary}. Included capability context: {string.Join("; ", includedCollections)}";
     }
 
     private void BuildDomainTrees(List<DomainItem> domains, List<CollectionItem> collections)
@@ -2214,10 +2349,69 @@ public partial class MainWindow : Window
     {
         return (retrievalMode ?? string.Empty).Trim() switch
         {
+            "NoDocuments" => "No Documents",
+            "DocumentsOnly" => "Full Documents",
+            "RagOnly" => "Semantic RAG",
+            "DocumentsAndRag" => "Documents + RAG",
+            "Disabled" => "Documents Off",
             "VectorRag" => "Vector RAG",
             "Hybrid" => "Hybrid",
             _ => "Full Context",
         };
+    }
+
+    private string GetSelectedRetrievalMode()
+    {
+        if (IncludeDocumentsCheckBox is null || IncludeRagCheckBox is null)
+        {
+            return "Hybrid";
+        }
+
+        if (IncludeDocumentsCheckBox.IsChecked != true)
+        {
+            return "Disabled";
+        }
+
+        return IncludeRagCheckBox.IsChecked == true ? "Hybrid" : "FullContext";
+    }
+
+    private List<string> GetEnabledContextSources()
+    {
+        var enabled = new List<string>();
+        if (IncludeDocumentsCheckBox is null
+            || IncludeRagCheckBox is null
+            || IncludePoliciesCheckBox is null
+            || IncludeDomainContextCheckBox is null
+            || IncludeControlsCheckBox is null)
+        {
+            enabled.Add("Documents + RAG");
+            enabled.Add("Policies");
+            enabled.Add("Domain Context");
+            enabled.Add("Controls");
+            return enabled;
+        }
+
+        if (IncludeDocumentsCheckBox.IsChecked == true)
+        {
+            enabled.Add(IncludeRagCheckBox.IsChecked == true ? "Documents + RAG" : "Documents");
+        }
+
+        if (IncludePoliciesCheckBox.IsChecked == true)
+        {
+            enabled.Add("Policies");
+        }
+
+        if (IncludeDomainContextCheckBox.IsChecked == true)
+        {
+            enabled.Add("Domain Context");
+        }
+
+        if (IncludeControlsCheckBox.IsChecked == true)
+        {
+            enabled.Add("Controls");
+        }
+
+        return enabled;
     }
 
     private static ChatResponseStats BuildMessageStats(
@@ -2524,14 +2718,14 @@ public partial class MainWindow : Window
             body {
               font-family: "Segoe UI", sans-serif;
               margin: 0;
-              padding: 18px;
+              padding: 10px;
               background: #f8f6f1;
               color: #263746;
             }
             .exchange {
               border: 1px solid #d8dde5;
               border-radius: 10px;
-              margin: 0 0 14px 0;
+              margin: 0 0 8px 0;
               overflow: hidden;
               background: #ffffff;
               box-shadow: 0 1px 2px rgba(0,0,0,.04);
@@ -2540,7 +2734,7 @@ public partial class MainWindow : Window
             .ex-header {
               background: #f3f6fa;
               color: #6e7ca0;
-              padding: 9px 12px;
+              padding: 6px 9px;
               font-weight: 600;
               border-bottom: 1px solid #d8dde5;
               display: flex;
@@ -2548,7 +2742,7 @@ public partial class MainWindow : Window
               align-items: center;
             }
             .ex-body {
-              padding: 14px 14px 52px 14px;
+              padding: 9px 10px 42px 10px;
             }
             .ex-body h1, .ex-body h2, .ex-body h3, .ex-body h4 {
               color: #18344a;
@@ -2557,10 +2751,10 @@ public partial class MainWindow : Window
             .section-label {
               font-weight: 700;
               color: #18344a;
-              margin: 0 0 8px 0;
+              margin: 0 0 6px 0;
             }
             .answer-section {
-              margin-top: 16px;
+              margin-top: 12px;
             }
             pre {
               background: #f5f7fa;
@@ -2599,8 +2793,8 @@ public partial class MainWindow : Window
             }
             .info-row {
               position: absolute;
-              right: 10px;
-              bottom: 34px;
+              right: 8px;
+              bottom: 30px;
               z-index: 3;
             }
             .info-toggle {
@@ -2650,7 +2844,7 @@ public partial class MainWindow : Window
               left: 0;
               right: 0;
               bottom: 0;
-              padding: 9px 14px 8px 18px;
+              padding: 7px 10px 6px 12px;
               font-size: 12px;
               color: #5f6f8d;
               background: #e8edf6;
@@ -2661,8 +2855,8 @@ public partial class MainWindow : Window
               background: #ffffff;
               color: #7c2430;
               border-radius: 999px;
-              width: 28px;
-              height: 28px;
+              width: 26px;
+              height: 26px;
               display: inline-flex;
               align-items: center;
               justify-content: center;
@@ -2674,8 +2868,8 @@ public partial class MainWindow : Window
               background: #fff3f4;
             }
             .delete-btn svg {
-              width: 14px;
-              height: 14px;
+              width: 13px;
+              height: 13px;
               stroke: currentColor;
               stroke-width: 2;
               fill: none;
@@ -2685,15 +2879,15 @@ public partial class MainWindow : Window
             .actions {
               display: inline-flex;
               align-items: center;
-              gap: 8px;
+              gap: 5px;
             }
             .save-btn {
               border: 1px solid #d8dde5;
               background: #ffffff;
               color: #315b73;
               border-radius: 999px;
-              width: 32px;
-              height: 32px;
+              width: 26px;
+              height: 26px;
               display: inline-flex;
               align-items: center;
               justify-content: center;
@@ -2705,8 +2899,8 @@ public partial class MainWindow : Window
               background: #f3f6fa;
             }
             .save-btn svg {
-              width: 18px;
-              height: 18px;
+              width: 15px;
+              height: 15px;
               stroke: currentColor;
               stroke-width: 1.8;
               fill: none;
@@ -2787,14 +2981,14 @@ public partial class MainWindow : Window
             body {
               font-family: "Segoe UI", sans-serif;
               margin: 0;
-              padding: 18px;
+              padding: 10px;
               background: #f8f6f1;
               color: #263746;
             }
             .exchange {
               border: 1px solid #d8dde5;
               border-radius: 10px;
-              margin: 0 0 14px 0;
+              margin: 0 0 8px 0;
               overflow: hidden;
               background: #ffffff;
               box-shadow: 0 1px 2px rgba(0,0,0,.04);
@@ -2802,20 +2996,20 @@ public partial class MainWindow : Window
             .ex-header {
               background: #f3f6fa;
               color: #6e7ca0;
-              padding: 9px 12px;
+              padding: 6px 9px;
               font-weight: 600;
               border-bottom: 1px solid #d8dde5;
             }
             .ex-body {
-              padding: 14px;
+              padding: 9px 10px;
             }
             .section-label {
               font-weight: 700;
               color: #18344a;
-              margin: 0 0 8px 0;
+              margin: 0 0 6px 0;
             }
             .answer-section {
-              margin-top: 16px;
+              margin-top: 12px;
             }
             .question-copy {
               white-space: pre-wrap;
@@ -3836,9 +4030,27 @@ Chats: {threadTitles}
         ScheduleContextPreviewRefresh();
     }
 
-    private void RetrievalModeComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ContextOptionCheckBox_OnChanged(object sender, RoutedEventArgs e)
     {
+        UpdateContextOptionState();
+        UpdateIncludedContextSummary();
         ScheduleContextPreviewRefresh();
+    }
+
+    private void ContextOptionsPopup_OnClosed(object sender, EventArgs e)
+    {
+        if (ContextOptionsToggleButton is not null)
+        {
+            ContextOptionsToggleButton.IsChecked = false;
+        }
+    }
+
+    private void UpdateContextOptionState()
+    {
+        if (IncludeDocumentsCheckBox is null || IncludeRagCheckBox is null)
+        {
+            return;
+        }
     }
 
     private void ContextPreviewTimer_OnTick(object? sender, EventArgs e)
@@ -3910,7 +4122,7 @@ Chats: {threadTitles}
                 .Where(collection => collection.IsIncluded)
                 .Select(collection => collection.CollectionCode)
                 .ToList();
-            var retrievalMode = RetrievalModeComboBox.SelectedValue as string ?? "FullContext";
+            var retrievalMode = GetSelectedRetrievalMode();
 
             using var response = await _httpClient.PostAsJsonAsync(
                 "/ask/context-preview",
@@ -3920,6 +4132,12 @@ Chats: {threadTitles}
                     shortMemoryCollectionCode = shortMemoryCollection.CollectionCode,
                     longTermCollectionCodes = longTermCollections,
                     retrievalMode,
+                    selectedDomainCode = ResolveSelectedDomainCodeForChatContext(),
+                    includeDocuments = IncludeDocumentsCheckBox.IsChecked == true,
+                    includeRag = IncludeRagCheckBox.IsChecked == true,
+                    includePolicies = IncludePoliciesCheckBox.IsChecked == true,
+                    includeDomainContext = IncludeDomainContextCheckBox.IsChecked == true,
+                    includeControls = IncludeControlsCheckBox.IsChecked == true,
                     history = Array.Empty<object>(),
                 });
             response.EnsureSuccessStatusCode();
@@ -3954,6 +4172,53 @@ Chats: {threadTitles}
             ?? _projectCollections.FirstOrDefault();
     }
 
+    private string? ResolveSelectedDomainCodeForChatContext()
+    {
+        static bool IsUsableDomainCode(string? domainCode)
+        {
+            return !string.IsNullOrWhiteSpace(domainCode)
+                && !string.Equals(domainCode, "workspace-memory", StringComparison.OrdinalIgnoreCase)
+                && !domainCode.StartsWith("domain-type-", StringComparison.OrdinalIgnoreCase);
+        }
+
+        string? selectedTreeDomainCode = ProjectCollectionsTreeView.SelectedItem switch
+        {
+            CollectionItem collection when IsUsableDomainCode(collection.ParentDomain?.DomainCode) => collection.ParentDomain?.DomainCode,
+            CollectionItem collection when IsUsableDomainCode(collection.DomainCode) => collection.DomainCode,
+            ChatThreadItem thread when IsUsableDomainCode(thread.ParentCollection?.ParentDomain?.DomainCode) => thread.ParentCollection?.ParentDomain?.DomainCode,
+            ChatThreadItem thread when IsUsableDomainCode(thread.ParentCollection?.DomainCode) => thread.ParentCollection?.DomainCode,
+            _ => null,
+        };
+        if (IsUsableDomainCode(selectedTreeDomainCode))
+        {
+            return selectedTreeDomainCode;
+        }
+
+        var includedDomains = _capabilityDomains
+            .SelectMany(EnumerateDomainTree)
+            .Where(domain => domain.IsIncluded == true && !domain.IsGroup && IsUsableDomainCode(domain.DomainCode))
+            .Select(domain => domain.DomainCode)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (includedDomains.Count == 1)
+        {
+            return includedDomains[0];
+        }
+
+        var activeCollection = GetActiveProjectCollection();
+        if (IsUsableDomainCode(activeCollection?.ParentDomain?.DomainCode))
+        {
+            return activeCollection?.ParentDomain?.DomainCode;
+        }
+
+        if (IsUsableDomainCode(activeCollection?.DomainCode))
+        {
+            return activeCollection?.DomainCode;
+        }
+
+        return null;
+    }
+
     private async Task<bool> TryDeleteSelectedProjectTreeNodeFromKeyboardAsync()
     {
         if (Keyboard.FocusedElement is TextBox || Keyboard.Modifiers is not (ModifierKeys.None or ModifierKeys.Control))
@@ -3976,6 +4241,7 @@ Chats: {threadTitles}
 
     private void ActivateProjectCollection(CollectionItem collection)
     {
+        ClearMultiSelection();
         ClearProjectSelectionFlags();
         collection.IsSelected = true;
         _activeProjectCollection = collection;
@@ -3985,6 +4251,7 @@ Chats: {threadTitles}
 
     private void ActivateChatThread(ChatThreadItem thread)
     {
+        SetSingleMultiSelection(thread);
         ClearProjectSelectionFlags();
         thread.IsSelected = true;
         _activeChatThread = thread;
@@ -4006,6 +4273,65 @@ Chats: {threadTitles}
                 thread.IsSelected = false;
             }
         }
+    }
+
+    private void ClearMultiSelection()
+    {
+        foreach (var thread in _selectedChatThreads)
+        {
+            thread.IsMultiSelected = false;
+        }
+
+        _selectedChatThreads.Clear();
+    }
+
+    private void SetSingleMultiSelection(ChatThreadItem thread)
+    {
+        ClearMultiSelection();
+        thread.IsMultiSelected = true;
+        _selectedChatThreads.Add(thread);
+    }
+
+    private void ToggleMultiSelection(ChatThreadItem thread)
+    {
+        if (_selectedChatThreads.Contains(thread))
+        {
+            thread.IsMultiSelected = false;
+            _selectedChatThreads.Remove(thread);
+            return;
+        }
+
+        if (_selectedChatThreads.Count > 0 &&
+            !ReferenceEquals(_selectedChatThreads[0].ParentCollection, thread.ParentCollection))
+        {
+            ClearMultiSelection();
+        }
+
+        thread.IsMultiSelected = true;
+        _selectedChatThreads.Add(thread);
+    }
+
+    private static ChatMessageItem CloneChatMessage(ChatMessageItem message)
+    {
+        return new ChatMessageItem
+        {
+            Role = message.Role,
+            Content = message.Content,
+            SupplementalText = message.SupplementalText,
+            CreatedAtUtc = message.CreatedAtUtc,
+            Stats = message.Stats is null
+                ? null
+                : new ChatResponseStats
+                {
+                    ModelName = message.Stats.ModelName,
+                    TotalTokens = message.Stats.TotalTokens,
+                    PromptTokens = message.Stats.PromptTokens,
+                    CompletionTokens = message.Stats.CompletionTokens,
+                    DurationSeconds = message.Stats.DurationSeconds,
+                    TokensPerSecond = message.Stats.TokensPerSecond,
+                    CreatedAtUtc = message.Stats.CreatedAtUtc,
+                }
+        };
     }
 
     private async void RootNameEditor_OnLostFocus(object sender, RoutedEventArgs e)
@@ -4083,9 +4409,15 @@ Chats: {threadTitles}
 
     private void SetCenterMode(bool isRootMode)
     {
+        if (isRootMode && _isThreadPanelExpanded)
+        {
+            _isThreadPanelExpanded = false;
+        }
+
         RootUploadPanel.Visibility = isRootMode ? Visibility.Visible : Visibility.Collapsed;
         RootContentPanel.Visibility = isRootMode ? Visibility.Visible : Visibility.Collapsed;
         ChildResponsePanel.Visibility = isRootMode ? Visibility.Collapsed : Visibility.Visible;
+        UpdateThreadPanelState();
     }
 
     private void RootNameEditor_OnLoaded(object sender, RoutedEventArgs e)
@@ -4146,6 +4478,32 @@ Chats: {threadTitles}
         UpdateTopPanelState();
     }
 
+    private void DecreaseUiScaleButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        AdjustUiScale(-UiScaleHelper.ScaleStep);
+    }
+
+    private void ResetUiScaleButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        ResetUiScale();
+    }
+
+    private void IncreaseUiScaleButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        AdjustUiScale(UiScaleHelper.ScaleStep);
+    }
+
+    private void ThreadPanelExpandButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (ChildResponsePanel.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _isThreadPanelExpanded = !_isThreadPanelExpanded;
+        UpdateThreadPanelState();
+    }
+
     private void UpdateTopPanelState()
     {
         if (!IsInitialized)
@@ -4161,6 +4519,76 @@ Chats: {threadTitles}
             _isTopPanelExpanded
                 ? "M 2 10 L 7 4 L 12 10"
                 : "M 2 4 L 7 10 L 12 4"
+        );
+    }
+
+    private void AdjustUiScale(double delta)
+    {
+        ApplyUiScale(_appUiScale + delta);
+    }
+
+    private void ResetUiScale()
+    {
+        ApplyUiScale(UiScaleHelper.DefaultScale);
+    }
+
+    private void ApplyUiScale(double scale)
+    {
+        var clampedScale = UiScaleHelper.Clamp(scale);
+        if (Math.Abs(clampedScale - _appUiScale) < 0.001)
+        {
+            return;
+        }
+
+        _appUiScale = clampedScale;
+        _settings = _settings with { AppUiScale = _appUiScale };
+        UiScaleHelper.ApplyWindowScale(this, _appUiScale);
+        UiScaleHelper.ApplyWebViewScale(ShellMenuWebView, _appUiScale);
+        UiScaleHelper.ApplyWebViewScale(ResponseWebView, _appUiScale);
+        _settings.Save();
+        SetUploadFeedback($"App font size: {Math.Round(_appUiScale * 100)}%", Brushes.DarkGreen);
+    }
+
+    private void UpdateThreadPanelState()
+    {
+        if (!IsInitialized)
+        {
+            return;
+        }
+
+        var canExpandThreadPanel = ChildResponsePanel.Visibility == Visibility.Visible;
+        if (!canExpandThreadPanel)
+        {
+            _isThreadPanelExpanded = false;
+        }
+
+        ThreadPanelExpandButton.Visibility = canExpandThreadPanel ? Visibility.Visible : Visibility.Collapsed;
+        ThreadPanelExpandButton.ToolTip = _isThreadPanelExpanded ? "Restore thread panel" : "Expand thread panel";
+
+        WorkingPaneHeaderBar.Visibility = _isThreadPanelExpanded ? Visibility.Collapsed : Visibility.Visible;
+        PromptInputPanel.Visibility = _isThreadPanelExpanded ? Visibility.Collapsed : Visibility.Visible;
+        PromptPaneSplitter.Visibility = _isThreadPanelExpanded ? Visibility.Collapsed : Visibility.Visible;
+        IncludedContextTextBlock.Visibility = _isThreadPanelExpanded ? Visibility.Collapsed : Visibility.Visible;
+
+        WorkingPaneHeaderSpacerRow.Height = _isThreadPanelExpanded ? new GridLength(0) : _defaultWorkingPaneHeaderSpacerRowHeight;
+        PromptInputRow.MinHeight = _isThreadPanelExpanded ? 0 : 120;
+        PromptInputRow.Height = _isThreadPanelExpanded ? new GridLength(0) : _defaultPromptInputRowHeight;
+        PromptSplitterRow.Height = _isThreadPanelExpanded ? new GridLength(0) : _defaultPromptSplitterRowHeight;
+        WorkPanelTopSpacerRow.Height = _isThreadPanelExpanded ? new GridLength(0) : _defaultWorkPanelTopSpacerRowHeight;
+
+        Grid.SetRow(WorkPanel, _isThreadPanelExpanded ? 2 : 5);
+        Grid.SetRowSpan(WorkPanel, _isThreadPanelExpanded ? 4 : 1);
+
+        ThreadPanelHeader.Visibility = _isThreadPanelExpanded ? Visibility.Collapsed : Visibility.Visible;
+        Grid.SetRow(ThreadPanelContentHost, _isThreadPanelExpanded ? 0 : 2);
+        Grid.SetRowSpan(ThreadPanelContentHost, _isThreadPanelExpanded ? 5 : 1);
+        Grid.SetRow(ChildResponsePanel, _isThreadPanelExpanded ? 0 : 2);
+        Grid.SetRowSpan(ChildResponsePanel, _isThreadPanelExpanded ? 3 : 1);
+
+        ThreadPanelExpandIcon.Data = Geometry.Parse(
+            _isThreadPanelExpanded
+                ? "M 4 4 H 8 V 8 M 12 8 V 4 H 16 M 16 12 H 12 V 16 M 8 16 V 12 H 4"
+                : "M 4 8 V 4 H 8 M 12 4 H 16 V 8 M 16 12 V 16 H 12 M 8 16 H 4 V 12"
         );
     }
 

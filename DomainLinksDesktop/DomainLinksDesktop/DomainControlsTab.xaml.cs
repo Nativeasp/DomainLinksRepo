@@ -18,8 +18,10 @@ public partial class DomainControlsTab : UserControl
     private int _loadRequestVersion;
     private bool _isActive;
     private ControlSuggestionItem? _selectedSuggestion;
+    private ControlListItem? _selectedSavedControl;
 
     public ObservableCollection<ControlListItem> BranchControls { get; } = [];
+    public ObservableCollection<ControlListDisplayItem> DisplayControls { get; } = [];
     public ObservableCollection<ControlSuggestionItem> Suggestions { get; } = [];
 
     public DomainControlsTab()
@@ -111,6 +113,7 @@ public partial class DomainControlsTab : UserControl
         {
             BranchSummaryTextBlock.Text = "Select a domain to load controls.";
             BranchControls.Clear();
+            DisplayControls.Clear();
             return;
         }
 
@@ -123,11 +126,22 @@ public partial class DomainControlsTab : UserControl
         var requestVersion = ++_loadRequestVersion;
         var selectedDomainCode = _selectedDomain.DomainCode;
         var selectedDomainName = _selectedDomain.DisplayName;
+        var domainChanged = !string.Equals(_loadedDomainCode, selectedDomainCode, StringComparison.OrdinalIgnoreCase);
 
         try
         {
             SetBusyState(true, $"Loading controls for {selectedDomainName}...");
             await EnsureControlTypesLoadedAsync();
+
+            if (domainChanged)
+            {
+                Suggestions.Clear();
+                _selectedSuggestion = null;
+                _selectedSavedControl = null;
+                DraftDetailTextBlock.Text = string.Empty;
+                RebuildDisplayControls();
+                UpdateDraftButtons();
+            }
 
             var branchControls = await _httpClient.GetFromJsonAsync<List<ControlListItem>>(
                 $"/controls?branchRootDomainCode={Uri.EscapeDataString(selectedDomainCode)}") ?? [];
@@ -144,10 +158,11 @@ public partial class DomainControlsTab : UserControl
             {
                 BranchControls.Add(control);
             }
+            RebuildDisplayControls();
 
             _loadedDomainCode = selectedDomainCode;
             UpdateBranchSummary();
-            ControlsStatusTextBlock.Text = $"Loaded {BranchControls.Count} branch controls.";
+            ControlsStatusTextBlock.Text = $"Loaded {BranchControls.Count} saved controls.";
         }
         catch (Exception ex)
         {
@@ -231,9 +246,11 @@ public partial class DomainControlsTab : UserControl
             }
 
             _selectedSuggestion = null;
-            DraftDetailTextBox.Text = string.Empty;
+            _selectedSavedControl = null;
+            DraftDetailTextBlock.Text = string.Empty;
+            RebuildDisplayControls();
             UpdateDraftButtons();
-            ControlsStatusTextBlock.Text = $"Generated {Suggestions.Count} suggestions.";
+            ControlsStatusTextBlock.Text = $"Generated {Suggestions.Count} pending suggestions.";
         }
         catch (Exception ex)
         {
@@ -248,16 +265,37 @@ public partial class DomainControlsTab : UserControl
 
     private void BranchControlsDataGrid_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (BranchControlsDataGrid.SelectedItem is not ControlListItem control)
+        if (BranchControlsDataGrid.SelectedItem is not ControlListDisplayItem item)
         {
+            _selectedSuggestion = null;
+            _selectedSavedControl = null;
+            DraftDetailTextBlock.Text = string.Empty;
+            UpdateDraftButtons();
             return;
         }
 
-        _selectedSuggestion = null;
-        SuggestionsDataGrid.SelectedItem = null;
-        DraftDetailTextBox.Text = BuildSavedControlDetail(control);
+        if (item.Suggestion is not null)
+        {
+            _selectedSuggestion = item.Suggestion;
+            _selectedSavedControl = null;
+            DraftDetailTextBlock.Text = BuildDraftDetail(item.Suggestion);
+            ControlsStatusTextBlock.Text = $"Viewing pending suggestion: {item.DisplayName}";
+        }
+        else if (item.Control is not null)
+        {
+            _selectedSuggestion = null;
+            _selectedSavedControl = item.Control;
+            DraftDetailTextBlock.Text = BuildSavedControlDetail(item.Control);
+            ControlsStatusTextBlock.Text = $"Viewing saved control: {item.DisplayName}";
+        }
+        else
+        {
+            _selectedSuggestion = null;
+            _selectedSavedControl = null;
+            DraftDetailTextBlock.Text = string.Empty;
+        }
+
         UpdateDraftButtons();
-        ControlsStatusTextBlock.Text = $"Viewing saved control: {control.DisplayName}";
     }
 
     private async void PromptPreviewButton_OnClick(object sender, RoutedEventArgs e)
@@ -288,20 +326,6 @@ public partial class DomainControlsTab : UserControl
         {
             MessageBox.Show(Window.GetWindow(this), ex.Message, "Prompt Preview", MessageBoxButton.OK, MessageBoxImage.Error);
         }
-    }
-
-    private void SuggestionsDataGrid_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        _selectedSuggestion = SuggestionsDataGrid.SelectedItem as ControlSuggestionItem;
-        if (_selectedSuggestion is not null)
-        {
-            BranchControlsDataGrid.SelectedItem = null;
-        }
-
-        DraftDetailTextBox.Text = _selectedSuggestion is null
-            ? string.Empty
-            : BuildDraftDetail(_selectedSuggestion);
-        UpdateDraftButtons();
     }
 
     private void SqlPreviewButton_OnClick(object sender, RoutedEventArgs e)
@@ -344,7 +368,9 @@ public partial class DomainControlsTab : UserControl
             await response.Content.ReadFromJsonAsync<ControlExecutionResponse>();
             Suggestions.Remove(_selectedSuggestion);
             _selectedSuggestion = null;
-            DraftDetailTextBox.Text = string.Empty;
+            _selectedSavedControl = null;
+            DraftDetailTextBlock.Text = string.Empty;
+            RebuildDisplayControls();
             UpdateDraftButtons();
             await LoadForSelectedDomainAsync(force: true);
             ControlsStatusTextBlock.Text = "Control inserted and branch list refreshed.";
@@ -391,14 +417,32 @@ public partial class DomainControlsTab : UserControl
     {
         BranchSummaryTextBlock.Text = _selectedDomain is null
             ? "Select a domain to load controls."
-            : $"Branch: {_selectedDomain.DisplayName} ({_selectedDomain.DomainCode})";
+            : _selectedDomain.DisplayName;
     }
 
     private void UpdateDraftButtons()
     {
         var hasSuggestion = _selectedSuggestion is not null;
+        var hasSavedControl = _selectedSavedControl is not null;
+        RejectOrDeleteButton.IsEnabled = hasSuggestion || hasSavedControl;
+        RejectOrDeleteButton.Content = hasSuggestion ? "Reject" : hasSavedControl ? "Delete" : "Remove";
         SqlPreviewButton.IsEnabled = hasSuggestion;
         RunInsertButton.IsEnabled = hasSuggestion;
+    }
+
+    private void RebuildDisplayControls()
+    {
+        DisplayControls.Clear();
+
+        foreach (var control in BranchControls)
+        {
+            DisplayControls.Add(ControlListDisplayItem.FromSaved(control));
+        }
+
+        foreach (var suggestion in Suggestions)
+        {
+            DisplayControls.Add(ControlListDisplayItem.FromSuggestion(suggestion, _selectedDomain));
+        }
     }
 
     private void SetBusyState(bool isBusy, string? statusText = null)
@@ -406,11 +450,73 @@ public partial class DomainControlsTab : UserControl
         RefreshControlsButton.IsEnabled = !isBusy;
         PromptPreviewButton.IsEnabled = !isBusy;
         GenerateSuggestionsButton.IsEnabled = !isBusy;
+        RejectOrDeleteButton.IsEnabled = !isBusy && (_selectedSuggestion is not null || _selectedSavedControl is not null);
         RunInsertButton.IsEnabled = !isBusy && _selectedSuggestion is not null;
         SqlPreviewButton.IsEnabled = !isBusy && _selectedSuggestion is not null;
         if (!string.IsNullOrWhiteSpace(statusText))
         {
             ControlsStatusTextBlock.Text = statusText;
+        }
+    }
+
+    private async void RejectOrDeleteButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedSuggestion is not null)
+        {
+            var suggestionName = _selectedSuggestion.DisplayName;
+            Suggestions.Remove(_selectedSuggestion);
+            _selectedSuggestion = null;
+            _selectedSavedControl = null;
+            BranchControlsDataGrid.SelectedItem = null;
+            DraftDetailTextBlock.Text = string.Empty;
+            RebuildDisplayControls();
+            UpdateDraftButtons();
+            ControlsStatusTextBlock.Text = $"Rejected suggestion: {suggestionName}";
+            return;
+        }
+
+        if (_httpClient is null || _selectedSavedControl is null)
+        {
+            return;
+        }
+
+        var control = _selectedSavedControl;
+        var confirm = MessageBox.Show(
+            Window.GetWindow(this),
+            $"Delete '{control.DisplayName}' from the database?",
+            "Delete Control",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            SetBusyState(true, $"Deleting {control.DisplayName}...");
+            var response = await _httpClient.DeleteAsync($"/controls/{Uri.EscapeDataString(control.ControlId)}");
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(await ReadErrorAsync(response));
+            }
+
+            _selectedSavedControl = null;
+            _selectedSuggestion = null;
+            BranchControlsDataGrid.SelectedItem = null;
+            DraftDetailTextBlock.Text = string.Empty;
+            UpdateDraftButtons();
+            await LoadForSelectedDomainAsync(force: true);
+            ControlsStatusTextBlock.Text = $"Deleted control: {control.DisplayName}";
+        }
+        catch (Exception ex)
+        {
+            ControlsStatusTextBlock.Text = $"Delete failed: {ex.Message}";
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Delete Control", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusyState(false);
         }
     }
 
@@ -496,4 +602,46 @@ public partial class DomainControlsTab : UserControl
     }
 
     private sealed record ControlTypeOption(string DisplayName, string Code, string Description);
+
+    public sealed class ControlListDisplayItem
+    {
+        public ControlListItem? Control { get; private init; }
+        public ControlSuggestionItem? Suggestion { get; private init; }
+        public string DisplayName { get; private init; } = string.Empty;
+        public string ControlTypeName { get; private init; } = string.Empty;
+        public string ControlTypeDescription { get; private init; } = string.Empty;
+        public string Status { get; private init; } = string.Empty;
+        public bool IsCurrentDomainControl { get; private init; }
+        public bool IsPending { get; private init; }
+
+        public static ControlListDisplayItem FromSaved(ControlListItem control)
+        {
+            return new ControlListDisplayItem
+            {
+                Control = control,
+                DisplayName = control.DisplayName,
+                ControlTypeName = string.IsNullOrWhiteSpace(control.ControlTypeName) ? control.ControlTypeCode : control.ControlTypeName,
+                ControlTypeDescription = control.ControlTypeDescription,
+                Status = string.IsNullOrWhiteSpace(control.Status) ? "Saved" : control.Status,
+                IsCurrentDomainControl = control.IsCurrentDomainControl,
+                IsPending = false,
+            };
+        }
+
+        public static ControlListDisplayItem FromSuggestion(ControlSuggestionItem suggestion, DomainItem? selectedDomain)
+        {
+            var isCurrent = selectedDomain is not null
+                && string.Equals(suggestion.DomainCode, selectedDomain.DomainCode, StringComparison.OrdinalIgnoreCase);
+            return new ControlListDisplayItem
+            {
+                Suggestion = suggestion,
+                DisplayName = suggestion.DisplayName,
+                ControlTypeName = suggestion.ControlTypeCode,
+                ControlTypeDescription = suggestion.ControlTypeDescription,
+                Status = "Pending",
+                IsCurrentDomainControl = isCurrent,
+                IsPending = true,
+            };
+        }
+    }
 }

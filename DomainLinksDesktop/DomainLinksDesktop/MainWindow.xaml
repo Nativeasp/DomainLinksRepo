@@ -41,6 +41,9 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="360" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="40" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
@@ -89,6 +92,60 @@
                     </Border>
                 </Grid>
                 <Button Grid.Column="2"
+                        Width="32"
+                        Height="24"
+                        Margin="0,0,6,0"
+                        VerticalAlignment="Top"
+                        Click="DecreaseUiScaleButton_OnClick"
+                        Background="#FFFFFF"
+                        BorderBrush="#4E4E4E"
+                        BorderThickness="1"
+                        Padding="0"
+                        ToolTip="Decrease app font size">
+                    <TextBlock Text="A-"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Foreground="#222222"
+                               VerticalAlignment="Center"
+                               HorizontalAlignment="Center" />
+                </Button>
+                <Button Grid.Column="3"
+                        Width="32"
+                        Height="24"
+                        Margin="0,0,6,0"
+                        VerticalAlignment="Top"
+                        Click="ResetUiScaleButton_OnClick"
+                        Background="#FFFFFF"
+                        BorderBrush="#4E4E4E"
+                        BorderThickness="1"
+                        Padding="0"
+                        ToolTip="Reset app font size">
+                    <TextBlock Text="A"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Foreground="#222222"
+                               VerticalAlignment="Center"
+                               HorizontalAlignment="Center" />
+                </Button>
+                <Button Grid.Column="4"
+                        Width="32"
+                        Height="24"
+                        Margin="0,0,6,0"
+                        VerticalAlignment="Top"
+                        Click="IncreaseUiScaleButton_OnClick"
+                        Background="#FFFFFF"
+                        BorderBrush="#4E4E4E"
+                        BorderThickness="1"
+                        Padding="0"
+                        ToolTip="Increase app font size">
+                    <TextBlock Text="A+"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Foreground="#222222"
+                               VerticalAlignment="Center"
+                               HorizontalAlignment="Center" />
+                </Button>
+                <Button Grid.Column="5"
                         x:Name="TopPanelToggleButton"
                         Width="24"
                         Height="24"
@@ -136,7 +193,7 @@
                     BorderThickness="1"
                     CornerRadius="6"
                     Padding="14">
-                <Grid>
+                <Grid x:Name="WorkingPaneGrid">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="12" />
@@ -291,6 +348,16 @@
                                                 <Trigger Property="IsSelected" Value="True">
                                                     <Setter TargetName="SelectionBorder" Property="Background" Value="#1E7ACC" />
                                                 </Trigger>
+                                                <DataTrigger Binding="{Binding IsMultiSelected}" Value="True">
+                                                    <Setter TargetName="SelectionBorder" Property="Background" Value="#D9ECFF" />
+                                                </DataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding IsMultiSelected}" Value="True" />
+                                                        <Condition Binding="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=IsSelected}" Value="True" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter TargetName="SelectionBorder" Property="Background" Value="#1E7ACC" />
+                                                </MultiDataTrigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Setter.Value>
@@ -334,7 +401,7 @@
                                                         <Setter Property="Visibility" Value="Visible" />
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True">
-                                                        <Setter Property="Foreground" Value="#FFFFFF" />
+                                                        <Setter Property="Foreground" Value="#1A1A1A" />
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -354,7 +421,7 @@
                                                         <Setter Property="Visibility" Value="Collapsed" />
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True">
-                                                        <Setter Property="Foreground" Value="#FFFFFF" />
+                                                        <Setter Property="Foreground" Value="#1A1A1A" />
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -364,6 +431,7 @@
                             </HierarchicalDataTemplate>
                             <DataTemplate DataType="{x:Type local:ChatThreadItem}">
                                 <Grid Margin="2,1,2,1"
+                                      PreviewMouseLeftButtonDown="ChildThreadNode_OnPreviewMouseLeftButtonDown"
                                       PreviewMouseRightButtonDown="TreeNode_OnPreviewMouseRightButtonDown">
                                     <Grid.ContextMenu>
                                         <ContextMenu>
@@ -372,6 +440,9 @@
                                                       CommandParameter="{Binding}" />
                                             <MenuItem Header="AI Rename chat"
                                                       Click="AiRenameChildMenuItem_OnClick"
+                                                      CommandParameter="{Binding}" />
+                                            <MenuItem Header="Merge selected chats"
+                                                      Click="MergeSelectedChatsMenuItem_OnClick"
                                                       CommandParameter="{Binding}" />
                                             <MenuItem Header="Delete chat"
                                                       Click="DeleteChildMenuItem_OnClick"
@@ -398,7 +469,7 @@
                                                         <Setter Property="Visibility" Value="Visible" />
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True">
-                                                        <Setter Property="Foreground" Value="#FFFFFF" />
+                                                        <Setter Property="Foreground" Value="#1A1A1A" />
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -418,7 +489,7 @@
                                                         <Setter Property="Visibility" Value="Collapsed" />
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True">
-                                                        <Setter Property="Foreground" Value="#FFFFFF" />
+                                                        <Setter Property="Foreground" Value="#1A1A1A" />
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -450,18 +521,18 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="12" />
+                        <RowDefinition x:Name="WorkingPaneHeaderSpacerRow" Height="12" />
                         <RowDefinition x:Name="PromptInputRow" Height="160" MinHeight="120" />
-                        <RowDefinition Height="8" />
-                        <RowDefinition Height="12" />
+                        <RowDefinition x:Name="PromptSplitterRow" Height="8" />
+                        <RowDefinition x:Name="WorkPanelTopSpacerRow" Height="12" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <Grid>
+                    <Grid x:Name="WorkingPaneHeaderBar">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="220" />
-                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="360" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
@@ -495,15 +566,84 @@
                                     VerticalAlignment="Center">
                             <TextBlock Foreground="#5B6770"
                                        FontSize="11"
-                                       Text="Retrieval" />
-                            <ComboBox x:Name="RetrievalModeComboBox"
-                                      Margin="0,4,0,0"
-                                      Height="32"
-                                      Padding="6,4"
-                                      DisplayMemberPath="DisplayName"
-                                      SelectedValuePath="Code"
-                                      MinWidth="160"
-                                      ToolTip="Choose how chat context is assembled before it reaches the model." />
+                                       Text="Context" />
+                            <ToggleButton x:Name="ContextOptionsToggleButton"
+                                          Margin="0,4,0,0"
+                                          Height="32"
+                                          MinWidth="150"
+                                          HorizontalAlignment="Left"
+                                          Padding="10,4"
+                                          Background="#FFFFFF"
+                                          BorderBrush="#CFC7B6"
+                                          BorderThickness="1">
+                                <DockPanel>
+                                    <TextBlock Text="Context Sources"
+                                               VerticalAlignment="Center"
+                                               Foreground="#263746" />
+                                    <Path DockPanel.Dock="Right"
+                                          Margin="10,0,0,0"
+                                          VerticalAlignment="Center"
+                                          Stroke="#5B6770"
+                                          StrokeThickness="1.75"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          Data="M 1 1 L 6 6 L 11 1" />
+                                </DockPanel>
+                            </ToggleButton>
+                            <Popup x:Name="ContextOptionsPopup"
+                                   PlacementTarget="{Binding ElementName=ContextOptionsToggleButton}"
+                                   Placement="Bottom"
+                                   StaysOpen="False"
+                                   AllowsTransparency="True"
+                                   PopupAnimation="Fade"
+                                   Closed="ContextOptionsPopup_OnClosed"
+                                   IsOpen="{Binding IsChecked, ElementName=ContextOptionsToggleButton, Mode=TwoWay}">
+                                <Border Margin="0,4,0,0"
+                                        Padding="8"
+                                        Background="#FFFFFF"
+                                        BorderBrush="#CFC7B6"
+                                        BorderThickness="1"
+                                        HorizontalAlignment="Left"
+                                        CornerRadius="6">
+                                    <StackPanel Width="Auto"
+                                                MinWidth="0">
+                                        <CheckBox x:Name="IncludeDocumentsCheckBox"
+                                                  Margin="0,0,0,6"
+                                                  FontSize="13"
+                                                  Content="Documents"
+                                                  IsChecked="True"
+                                                  Checked="ContextOptionCheckBox_OnChanged"
+                                                  Unchecked="ContextOptionCheckBox_OnChanged" />
+                                        <CheckBox x:Name="IncludeRagCheckBox"
+                                                  Margin="0,0,0,6"
+                                                  FontSize="13"
+                                                  Content="RAG"
+                                                  IsChecked="True"
+                                                  Checked="ContextOptionCheckBox_OnChanged"
+                                                  Unchecked="ContextOptionCheckBox_OnChanged" />
+                                        <CheckBox x:Name="IncludePoliciesCheckBox"
+                                                  Margin="0,0,0,6"
+                                                  FontSize="13"
+                                                  Content="Policies"
+                                                  IsChecked="True"
+                                                  Checked="ContextOptionCheckBox_OnChanged"
+                                                  Unchecked="ContextOptionCheckBox_OnChanged" />
+                                        <CheckBox x:Name="IncludeDomainContextCheckBox"
+                                                  Margin="0,0,0,6"
+                                                  FontSize="13"
+                                                  Content="Domain Context"
+                                                  IsChecked="True"
+                                                  Checked="ContextOptionCheckBox_OnChanged"
+                                                  Unchecked="ContextOptionCheckBox_OnChanged" />
+                                        <CheckBox x:Name="IncludeControlsCheckBox"
+                                                  FontSize="13"
+                                                  Content="Controls"
+                                                  IsChecked="True"
+                                                  Checked="ContextOptionCheckBox_OnChanged"
+                                                  Unchecked="ContextOptionCheckBox_OnChanged" />
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
                         </StackPanel>
                         <Button x:Name="ClearPromptButton"
                                 Grid.Column="3"
@@ -562,6 +702,7 @@
                     </Grid>
 
                     <Border Grid.Row="2"
+                            x:Name="PromptInputPanel"
                             Background="#F3EFE7"
                             CornerRadius="6"
                             Padding="12">
@@ -600,6 +741,7 @@
                     </Border>
 
                     <GridSplitter Grid.Row="3"
+                                  x:Name="PromptPaneSplitter"
                                   Height="8"
                                   HorizontalAlignment="Stretch"
                                   VerticalAlignment="Stretch"
@@ -618,30 +760,31 @@
                         </Grid.Resources>
 
                         <Border x:Name="WorkPanel">
-                            <Grid>
+                            <Grid x:Name="WorkPanelGrid">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="8" />
                                     <RowDefinition Height="*" />
-                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="8" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
-                                <StackPanel>
+                                <StackPanel x:Name="ThreadPanelHeader">
                                     <TextBlock x:Name="CollectionHeaderTextBlock"
-                                               FontSize="28"
+                                               FontSize="18"
                                                FontWeight="SemiBold"
                                                Foreground="#18344A"
                                                Text="Project Collection" />
                                     <TextBlock x:Name="CollectionDetailTextBlock"
-                                               Margin="0,6,0,0"
-                                               FontSize="13"
+                                               Margin="0,3,0,0"
+                                               FontSize="11"
                                                Foreground="#5B6770"
                                                TextWrapping="Wrap"
                                                Text="Select a project collection on the left to upload content and chat against short memory plus optional durable domain context." />
                                 </StackPanel>
 
-                                <Grid Grid.Row="2">
+                                <Grid Grid.Row="2"
+                                      x:Name="ThreadPanelContentHost">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="12" />
@@ -831,41 +974,65 @@
                                         </ScrollViewer>
                                     </Border>
 
-                                    <Border Grid.Row="2"
+                                            <Border Grid.Row="2"
                                             x:Name="ChildResponsePanel"
                                             Background="#FFFFFF"
                                             BorderBrush="#D6D0C4"
                                             BorderThickness="1"
                                             CornerRadius="6"
-                                            Padding="14"
+                                            Padding="6"
                                             Visibility="Collapsed">
-                                        <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="10" />
-                                                <RowDefinition Height="*" />
-                                            </Grid.RowDefinitions>
                                             <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="1" />
+                                                    <RowDefinition Height="*" />
+                                                </Grid.RowDefinitions>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
                                                 <TextBlock FontSize="15"
                                                            FontWeight="SemiBold"
                                                            Foreground="#263746"
+                                                           VerticalAlignment="Center"
                                                            Text="Response Surface" />
-                                                <Button x:Name="SaveThreadButton"
+                                                <Button x:Name="ThreadPanelExpandButton"
                                                         Grid.Column="1"
-                                                        Width="38"
-                                                        Height="38"
+                                                        Width="28"
+                                                        Height="28"
+                                                        Margin="0,0,3,0"
+                                                        Padding="0"
+                                                        Click="ThreadPanelExpandButton_OnClick"
+                                                        ToolTip="Expand thread panel"
+                                                        Background="#FFFFFF"
+                                                        BorderBrush="#D6DCE5"
+                                                        BorderThickness="1">
+                                                    <Viewbox Width="15"
+                                                             Height="15">
+                                                        <Path x:Name="ThreadPanelExpandIcon"
+                                                              Stroke="#315B73"
+                                                              StrokeThickness="1.8"
+                                                              StrokeStartLineCap="Round"
+                                                              StrokeEndLineCap="Round"
+                                                              StrokeLineJoin="Round"
+                                                              Data="M 4 8 V 4 H 8 M 12 4 H 16 V 8 M 16 12 V 16 H 12 M 8 16 H 4 V 12" />
+                                                    </Viewbox>
+                                                </Button>
+                                                <Button x:Name="SaveThreadButton"
+                                                        Grid.Column="2"
+                                                        Width="28"
+                                                        Height="28"
                                                         Padding="0"
                                                         Click="SaveThreadButton_OnClick"
                                                         ToolTip="Save the whole chat thread as DOCX or HTML"
                                                         Background="#FFFFFF"
                                                         BorderBrush="#D6DCE5"
                                                         BorderThickness="1">
-                                                    <Viewbox Width="20"
-                                                             Height="20">
+                                                    <Viewbox Width="16"
+                                                             Height="16">
                                                         <Canvas Width="20"
                                                                 Height="20">
                                                             <Rectangle Canvas.Left="4"

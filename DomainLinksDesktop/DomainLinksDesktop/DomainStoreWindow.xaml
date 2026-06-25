@@ -261,30 +261,129 @@
                                             Margin="0,1,0,1"
                                             CornerRadius="4">
                                         <DockPanel>
-                                            <TextBlock DockPanel.Dock="Right"
-                                                       Margin="10,0,0,0"
-                                                       VerticalAlignment="Center"
-                                                       FontSize="11"
-                                                       Text="{Binding TreeMetaText}">
-                                                <TextBlock.Style>
-                                                    <Style TargetType="TextBlock">
+                                            <StackPanel DockPanel.Dock="Right"
+                                                        Margin="10,0,0,0"
+                                                        Orientation="Horizontal"
+                                                        VerticalAlignment="Center">
+                                                <StackPanel.Style>
+                                                    <Style TargetType="StackPanel">
                                                         <Setter Property="Visibility" Value="Visible" />
-                                                        <Setter Property="Foreground" Value="#434A45" />
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding TreeMetaText}" Value="">
                                                                 <Setter Property="Visibility" Value="Collapsed" />
                                                             </DataTrigger>
-                                                            <MultiDataTrigger>
-                                                                <MultiDataTrigger.Conditions>
-                                                                    <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True" />
-                                                                    <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=(Selector.IsSelectionActive)}" Value="True" />
-                                                                </MultiDataTrigger.Conditions>
-                                                                <Setter Property="Foreground" Value="#FFFFFF" />
-                                                            </MultiDataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
-                                                </TextBlock.Style>
-                                            </TextBlock>
+                                                </StackPanel.Style>
+                                                <TextBlock Text="(" Foreground="#5E6368" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding TreeMetaCollectionText}"
+                                                           Margin="0,0,0,0"
+                                                           FontSize="11"
+                                                           FontWeight="Bold"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="#B22222" />
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TreeMetaCollectionText}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True" />
+                                                                        <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=(Selector.IsSelectionActive)}" Value="True" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Foreground" Value="#FFFFFF" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBlock Text="  "
+                                                           FontSize="11"
+                                                           FontWeight="Bold"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TreeMetaCollectionText}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding TreeMetaPolicyText}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBlock Text="{Binding TreeMetaPolicyText}"
+                                                           FontSize="11"
+                                                           FontWeight="Bold"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="#B22222" />
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TreeMetaPolicyText}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True" />
+                                                                        <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=(Selector.IsSelectionActive)}" Value="True" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Foreground" Value="#FFFFFF" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBlock Text="  "
+                                                           FontSize="11"
+                                                           FontWeight="Bold"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TreeMetaPolicyText}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding TreeMetaControlText}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBlock Text="{Binding TreeMetaControlText}"
+                                                           FontSize="11"
+                                                           FontWeight="Bold"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="#B22222" />
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding TreeMetaControlText}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=IsSelected}" Value="True" />
+                                                                        <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=TreeViewItem}, Path=(Selector.IsSelectionActive)}" Value="True" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Foreground" Value="#FFFFFF" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBlock Text=")" Foreground="#5E6368" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
+                                            </StackPanel>
                                             <TextBlock Margin="0,0,8,0"
                                                        VerticalAlignment="Center"
                                                        Foreground="#4C5F6B"
@@ -488,6 +587,7 @@
                                     </StackPanel>
 
                                     <Expander Grid.Row="6"
+                                              x:Name="AiWritingAssistExpander"
                                               Header="AI Writing Assist"
                                               IsExpanded="True">
                                         <Border Margin="0,8,0,0"
@@ -704,6 +804,174 @@
                             <local:DomainPolicyWorkspaceTab x:Name="PolicyWorkspaceTabContent" />
                         </Border>
                     </TabItem>
+                    <TabItem x:Name="CollectionsTabItem"
+                             Header="Collections"
+                             Style="{StaticResource DomainStoreTabItemStyle}">
+                        <Border Background="#FAF8F3"
+                                BorderBrush="#D6D0C4"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="14">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="8" />
+                                    <RowDefinition x:Name="CollectionsPaneRow" Height="220" MinHeight="120" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="8" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock FontSize="17"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#263746"
+                                                   Style="{StaticResource CopyableLabelTextBlockStyle}"
+                                                   Text="Collections and Documents" />
+                                        <TextBlock Margin="0,4,0,0"
+                                                   Foreground="#5B6770"
+                                                   FontSize="12"
+                                                   Style="{StaticResource CopyableLabelTextBlockStyle}"
+                                                   Text="Collections group source corpora, and documents remain directly accessible while feeding retrieval." />
+                                    </StackPanel>
+                                </Grid>
+
+                                <StackPanel Grid.Row="2"
+                                            Orientation="Horizontal">
+                                    <Button Width="118"
+                                            Height="32"
+                                            Margin="0,0,8,0"
+                                            Click="NewCollectionButton_OnClick"
+                                            Content="New Collection" />
+                                    <Button Width="122"
+                                            Height="32"
+                                            Margin="0,0,8,0"
+                                            Click="DeleteCollectionButton_OnClick"
+                                            Content="Delete Collection" />
+                                    <Button Width="94"
+                                            Height="32"
+                                            Margin="0,0,8,0"
+                                            Click="UploadDocumentButton_OnClick"
+                                            Content="Upload File" />
+                                    <Button Width="82"
+                                            Height="32"
+                                            Margin="0,0,8,0"
+                                            Click="AddTextButton_OnClick"
+                                            Content="Add Text" />
+                                    <Button Width="88"
+                                            Height="32"
+                                            Margin="0,0,8,0"
+                                            Click="OpenTextButton_OnClick"
+                                            Content="Open Text" />
+                                    <Button Width="74"
+                                            Height="32"
+                                            Click="DeleteDocumentButton_OnClick"
+                                            Content="Delete" />
+                                </StackPanel>
+
+                                <Border Grid.Row="4"
+                                        Background="#FFFFFF"
+                                        BorderBrush="#D6D0C4"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="8">
+                                    <ListBox x:Name="CollectionsListBox"
+                                             SelectionChanged="CollectionsListBox_OnSelectionChanged"
+                                             BorderThickness="0"
+                                             Background="Transparent">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type local:CollectionItem}">
+                                                <Border Margin="0,0,0,8"
+                                                        Padding="10"
+                                                        Background="#F8F6F1"
+                                                        BorderBrush="#E2DBCF"
+                                                        BorderThickness="1"
+                                                        CornerRadius="6">
+                                                    <StackPanel>
+                                                        <TextBlock FontWeight="SemiBold"
+                                                                   Foreground="#263746"
+                                                                   Text="{Binding DisplayName}" />
+                                                        <TextBlock Margin="0,4,0,0"
+                                                                   Foreground="#5B6770"
+                                                                   FontSize="11"
+                                                                   Text="{Binding CollectionCode}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+
+                                <GridSplitter Grid.Row="5"
+                                              Height="12"
+                                              HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Stretch"
+                                              Background="#D6D0C4"
+                                              ResizeBehavior="PreviousAndNext"
+                                              ResizeDirection="Rows"
+                                              ShowsPreview="True" />
+
+                                <Grid Grid.Row="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock FontSize="15"
+                                               FontWeight="SemiBold"
+                                               Foreground="#263746"
+                                               Style="{StaticResource CopyableLabelTextBlockStyle}"
+                                               Text="Documents" />
+                                    <TextBlock Grid.Column="1"
+                                               x:Name="DocumentScopeTextBlock"
+                                               VerticalAlignment="Center"
+                                               Foreground="#5B6770"
+                                               FontSize="12"
+                                               Text="No collection selected" />
+                                </Grid>
+
+                                <DataGrid Grid.Row="10"
+                                          x:Name="DocumentsDataGrid"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          CanUserAddRows="False"
+                                          CanUserDeleteRows="False"
+                                          HeadersVisibility="Column"
+                                          SelectionMode="Single"
+                                          MouseDoubleClick="DocumentsDataGrid_OnMouseDoubleClick">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Document"
+                                                            Width="2*"
+                                                            Binding="{Binding SourceName}" />
+                                        <DataGridTextColumn Header="Collection"
+                                                            Width="1.4*"
+                                                            Binding="{Binding CollectionCode}" />
+                                        <DataGridTextColumn Header="Source"
+                                                            Width="1.1*"
+                                                            Binding="{Binding SourceType}" />
+                                        <DataGridTextColumn Header="Embed Status"
+                                                            Width="1.1*"
+                                                            Binding="{Binding EmbedStatusDisplay}" />
+                                        <DataGridTextColumn Header="Updated"
+                                                            Width="1.2*"
+                                                            Binding="{Binding UpdatedAtUtc, StringFormat={}{0:yyyy-MM-dd HH:mm}}" />
+                                        <DataGridTextColumn Header="Chunks"
+                                                            Width="0.8*"
+                                                            Binding="{Binding ContentUnitCount}" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Border>
+                    </TabItem>
                 </TabControl>
             </Border>
 
@@ -727,169 +995,13 @@
                     Content="▶" />
 
             <Border Grid.Column="4"
+                    Visibility="Collapsed"
                     Background="#FAF8F3"
                     BorderBrush="#D6D0C4"
                     BorderThickness="1"
                     CornerRadius="8"
-                    Padding="18,14,14,14">
-                <Grid Margin="6,0,0,0">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="8" />
-                        <RowDefinition x:Name="CollectionsPaneRow" Height="220" MinHeight="120" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="8" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <TextBlock FontSize="17"
-                                       FontWeight="SemiBold"
-                                       Foreground="#263746"
-                                       Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                       Text="Collections and Documents" />
-                            <TextBlock Margin="0,4,0,0"
-                                       Foreground="#5B6770"
-                                       FontSize="12"
-                                       Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                       Text="Collections group source corpora, and documents remain directly accessible while feeding retrieval." />
-                        </StackPanel>
-                    </Grid>
-
-                    <StackPanel Grid.Row="2"
-                                Orientation="Horizontal">
-                        <Button Width="118"
-                                Height="32"
-                                Margin="0,0,8,0"
-                                Click="NewCollectionButton_OnClick"
-                                Content="New Collection" />
-                        <Button Width="122"
-                                Height="32"
-                                Margin="0,0,8,0"
-                                Click="DeleteCollectionButton_OnClick"
-                                Content="Delete Collection" />
-                        <Button Width="94"
-                                Height="32"
-                                Margin="0,0,8,0"
-                                Click="UploadDocumentButton_OnClick"
-                                Content="Upload File" />
-                        <Button Width="82"
-                                Height="32"
-                                Margin="0,0,8,0"
-                                Click="AddTextButton_OnClick"
-                                Content="Add Text" />
-                        <Button Width="88"
-                                Height="32"
-                                Margin="0,0,8,0"
-                                Click="OpenTextButton_OnClick"
-                                Content="Open Text" />
-                        <Button Width="74"
-                                Height="32"
-                                Click="DeleteDocumentButton_OnClick"
-                                Content="Delete" />
-                    </StackPanel>
-
-                    <Border Grid.Row="4"
-                            Background="#FFFFFF"
-                            BorderBrush="#D6D0C4"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="8">
-                        <ListBox x:Name="CollectionsListBox"
-                                 SelectionChanged="CollectionsListBox_OnSelectionChanged"
-                                 BorderThickness="0"
-                                 Background="Transparent">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate DataType="{x:Type local:CollectionItem}">
-                                    <Border Margin="0,0,0,8"
-                                            Padding="10"
-                                            Background="#F8F6F1"
-                                            BorderBrush="#E2DBCF"
-                                            BorderThickness="1"
-                                            CornerRadius="6">
-                                        <StackPanel>
-                                            <TextBlock FontWeight="SemiBold"
-                                                       Foreground="#263746"
-                                                       Text="{Binding DisplayName}" />
-                                            <TextBlock Margin="0,4,0,0"
-                                                       Foreground="#5B6770"
-                                                       FontSize="11"
-                                                       Text="{Binding CollectionCode}" />
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                    </Border>
-
-                    <GridSplitter Grid.Row="5"
-                                  Height="12"
-                                  HorizontalAlignment="Stretch"
-                                  VerticalAlignment="Stretch"
-                                  Background="#D6D0C4"
-                                  ResizeBehavior="PreviousAndNext"
-                                  ResizeDirection="Rows"
-                                  ShowsPreview="True" />
-
-                    <Grid Grid.Row="6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock FontSize="15"
-                                   FontWeight="SemiBold"
-                                   Foreground="#263746"
-                                   Style="{StaticResource CopyableLabelTextBlockStyle}"
-                                   Text="Documents" />
-                        <TextBlock Grid.Column="1"
-                                   x:Name="DocumentScopeTextBlock"
-                                   VerticalAlignment="Center"
-                                   Foreground="#5B6770"
-                                   FontSize="12"
-                                   Text="No collection selected" />
-                    </Grid>
-
-                    <DataGrid Grid.Row="10"
-                              x:Name="DocumentsDataGrid"
-                              AutoGenerateColumns="False"
-                              IsReadOnly="True"
-                              CanUserAddRows="False"
-                              CanUserDeleteRows="False"
-                              HeadersVisibility="Column"
-                              SelectionMode="Single"
-                              MouseDoubleClick="DocumentsDataGrid_OnMouseDoubleClick">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Document"
-                                                Width="2*"
-                                                Binding="{Binding SourceName}" />
-                            <DataGridTextColumn Header="Collection"
-                                                Width="1.4*"
-                                                Binding="{Binding CollectionCode}" />
-                            <DataGridTextColumn Header="Source"
-                                                Width="1.1*"
-                                                Binding="{Binding SourceType}" />
-                            <DataGridTextColumn Header="Embed Status"
-                                                Width="1.1*"
-                                                Binding="{Binding EmbedStatusDisplay}" />
-                            <DataGridTextColumn Header="Updated"
-                                                Width="1.2*"
-                                                Binding="{Binding UpdatedAtUtc, StringFormat={}{0:yyyy-MM-dd HH:mm}}" />
-                            <DataGridTextColumn Header="Chunks"
-                                                Width="0.8*"
-                                                Binding="{Binding ContentUnitCount}" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Grid>
+                    Padding="0">
+                <Grid />
             </Border>
         </Grid>
 

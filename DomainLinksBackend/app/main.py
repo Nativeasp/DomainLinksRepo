@@ -23,18 +23,22 @@ from .repositories import (
     archive_document,
     clear_policy_tables,
     create_control_from_suggestion,
+    delete_control,
     create_collection,
     create_domain,
     create_domain_type,
     create_text_document,
     delete_collection,
     delete_domain,
+    delete_policy,
     delete_content_unit,
     get_collection_delete_preview,
+    list_policy_control_explanations,
     get_control_suggestion_context,
     get_default_embedding_profile,
     get_domain_delete_preview,
     get_latest_policy_for_root_domain,
+    list_context_units_for_collections,
     get_policy_presentation_data,
     get_retrieval_profile,
     get_recent_context_units,
@@ -65,6 +69,7 @@ from .repositories import (
     upsert_user_chat_backup_file,
     update_collection,
     update_domain,
+    upsert_policy_control_explanation,
 )
 
 
@@ -736,6 +741,119 @@ def _build_context_lines(rows: list[dict[str, object]]) -> list[str]:
     return lines
 
 
+def _build_policy_context_lines(policy_data: dict[str, object]) -> list[str]:
+    policy = policy_data.get("policy") or {}
+    title = str(policy.get("PolicyTitle") or "").strip()
+    code = str(policy.get("PolicyCode") or "").strip()
+    version = str(policy.get("VersionText") or "").strip()
+    status = str(policy.get("Status") or "").strip()
+    root_name = str(policy.get("RootDomainName") or "").strip()
+    root_code = str(policy.get("RootDomainCode") or "").strip()
+
+    lines = [
+        f"[Saved Policy | {title or 'Policy'}] Domain={root_name} ({root_code}); Code={code}; Version={version}; Status={status}"
+    ]
+
+    def append_section(label: str, rows: list[dict[str, object]], limit: int = 5) -> None:
+        for row in rows[:limit]:
+            text = str(row.get("StatementText") or "").strip()
+            if text:
+                lines.append(f"[Saved Policy | {label}] {text}")
+
+    append_section("Objective", policy_data.get("objectives") or [], limit=4)
+    append_section("Principle", policy_data.get("principles") or [], limit=4)
+    append_section("Accountability", policy_data.get("accountability") or [], limit=3)
+    append_section("Transparency", policy_data.get("transparency") or [], limit=3)
+    append_section("Strategy", policy_data.get("strategy") or [], limit=3)
+    append_section("Consequence", policy_data.get("consequences") or [], limit=3)
+
+    seen_controls: set[str] = set()
+    grouped_rows: dict[str, list[dict[str, object]]] = {}
+    for row in policy_data.get("controlStatements") or []:
+        control_code = str(row.get("ControlCode") or "").strip()
+        if not control_code:
+            continue
+        grouped_rows.setdefault(control_code, []).append(row)
+
+    for control_code, rows in list(grouped_rows.items())[:8]:
+        first = rows[0]
+        control_name = str(first.get("ControlName") or control_code).strip()
+        if control_code.lower() in seen_controls:
+            continue
+        seen_controls.add(control_code.lower())
+        lines.append(
+            f"[Saved Policy | Control] {control_name} ({control_code}) | "
+            f"{str(first.get('ControlTypeName') or '').strip()} ({str(first.get('ControlTypeCode') or '').strip()})"
+        )
+        for row in rows[:3]:
+            text = str(row.get("StatementText") or "").strip()
+            if text:
+                lines.append(f"[Saved Policy | Control Statement] {text}")
+
+    return lines
+
+
+def _build_domain_context_lines(domain_context: dict[str, object]) -> list[str]:
+    domain = domain_context.get("domain") or {}
+    display_name = str(domain.get("DisplayName") or domain.get("DomainCode") or "").strip()
+    domain_code = str(domain.get("DomainCode") or "").strip()
+    description = str(domain.get("Description") or "").strip()
+    parent_path = str(domain_context.get("parentPath") or "").strip()
+
+    lines = [
+        f"[Domain Context | Domain] {display_name} ({domain_code})"
+        + (f" | Path={parent_path}" if parent_path else "")
+    ]
+    if description:
+        lines.append(f"[Domain Context | Summary] {description}")
+
+    for item in (domain_context.get("childDomains") or [])[:8]:
+        child_name = str(item.get("displayName") or item.get("domainCode") or "").strip()
+        child_code = str(item.get("domainCode") or "").strip()
+        child_type = str(item.get("domainType") or "").strip()
+        if child_name:
+            detail = f"[Domain Context | Child Domain] {child_name} ({child_code})"
+            if child_type:
+                detail += f" | Type={child_type}"
+            lines.append(detail)
+
+    for item in (domain_context.get("collections") or [])[:6]:
+        collection_name = str(item.get("DisplayName") or item.get("CollectionCode") or "").strip()
+        document_count = int(item.get("DocumentCount") or 0)
+        collection_description = str(item.get("Description") or "").strip()
+        if collection_name:
+            lines.append(
+                f"[Domain Context | Collection] {collection_name} | Documents={document_count}"
+                + (f" | {collection_description}" if collection_description else "")
+            )
+
+    return lines
+
+
+def _build_controls_context_lines(control_rows: list[dict[str, object]]) -> list[str]:
+    lines: list[str] = []
+    for row in control_rows[:12]:
+        control_name = str(row.get("DisplayName") or row.get("ControlCode") or "").strip()
+        control_code = str(row.get("ControlCode") or "").strip()
+        control_type = str(row.get("ControlTypeName") or row.get("ControlTypeCode") or "").strip()
+        domain_name = str(row.get("DomainDisplayName") or row.get("DomainCode") or "").strip()
+        description = str(row.get("Description") or "").strip()
+        objective = str(row.get("ControlObjective") or "").strip()
+        evidence = str(row.get("EvidenceExpectation") or "").strip()
+        if not control_name:
+            continue
+        lines.append(
+            f"[Controls | Control] {control_name} ({control_code}) | Domain={domain_name} | Type={control_type}"
+        )
+        if description:
+            lines.append(f"[Controls | Summary] {description}")
+        if objective:
+            lines.append(f"[Controls | Objective] {objective}")
+        if evidence:
+            lines.append(f"[Controls | Evidence] {evidence}")
+    return lines
+
+
 def _build_chat_trace_metadata(
     *,
     retrieval_mode: str,
@@ -747,6 +865,7 @@ def _build_chat_trace_metadata(
     history_text: str,
     compiled_prompt: str,
     retrieval_profile: dict[str, object] | None,
+    policy_context_lines: list[str] | None = None,
     fallback_reason: str | None = None,
 ) -> dict[str, object]:
     actual_context_tokens = sum(
@@ -775,6 +894,8 @@ def _build_chat_trace_metadata(
                 if str(row.get("SourceName") or "").strip()
             }
         ),
+        "policyContextLineCount": len(policy_context_lines or []),
+        "policyContextChars": len("\n".join(policy_context_lines or [])),
         "fallbackOccurred": bool(fallback_reason),
         "fallbackReason": fallback_reason or "",
     }
@@ -888,28 +1009,39 @@ def _ensure_embeddings_for_content(
 
 
 def _retrieve_context_for_chat(settings, request: AskRequest) -> tuple[list[dict[str, object]], dict[str, object]]:
-    collection_codes = [request.shortMemoryCollectionCode, *request.longTermCollectionCodes]
-    retrieval_mode = _normalize_retrieval_mode(request.retrievalMode)
+    checked_domain_collection_codes = [
+        code for code in request.longTermCollectionCodes
+        if str(code or "").strip()
+    ]
+
+    if not request.includeDocuments and not request.includeRag:
+        retrieval_mode = "NoDocuments"
+        return [], {
+            "retrievalMode": retrieval_mode,
+            "collectionCodes": checked_domain_collection_codes,
+            "retrievalProfile": None,
+            "fallbackReason": "Document context is turned off.",
+        }
+
+    if request.includeDocuments and not request.includeRag:
+        rows = list_context_units_for_collections(settings, checked_domain_collection_codes)
+        return rows, {
+            "retrievalMode": "DocumentsOnly",
+            "collectionCodes": checked_domain_collection_codes,
+            "retrievalProfile": None,
+            "fallbackReason": None if rows else "No active documents were found under the checked domain collections.",
+        }
+
+    collection_codes = checked_domain_collection_codes
+    retrieval_mode = "DocumentsAndRag" if request.includeDocuments else "RagOnly"
     fallback_reason: str | None = None
     retrieval_profile: dict[str, object] | None = None
 
-    if retrieval_mode == "FullContext":
-        rows = get_recent_context_units(settings, collection_codes)
-        return rows, {
-            "retrievalMode": retrieval_mode,
-            "collectionCodes": collection_codes,
-            "retrievalProfile": retrieval_profile,
-            "fallbackReason": fallback_reason,
-        }
-
-    profile_code = "domain-vector-default" if retrieval_mode == "VectorRag" else "project-hybrid-default"
+    profile_code = "domain-vector-default"
     retrieval_profile = get_retrieval_profile(settings, profile_code)
     if not retrieval_profile:
         fallback_reason = f"Retrieval profile '{profile_code}' is not configured."
-        if retrieval_mode == "Hybrid":
-            rows = get_recent_context_units(settings, collection_codes)
-        else:
-            rows = []
+        rows = list_context_units_for_collections(settings, collection_codes) if request.includeDocuments else []
         return rows, {
             "retrievalMode": retrieval_mode,
             "collectionCodes": collection_codes,
@@ -936,22 +1068,14 @@ def _retrieve_context_for_chat(settings, request: AskRequest) -> tuple[list[dict
     if not vector_rows and not fallback_reason:
         fallback_reason = "Vector retrieval found no embedded chunks within the selected collections."
 
-    include_chunks = bool(retrieval_profile.get("IncludeChunks"))
-    include_whole_docs = bool(retrieval_profile.get("IncludeWholeDocs"))
     max_context_tokens = int(retrieval_profile.get("MaxContextTokens") or 0)
-    if include_whole_docs:
-        vector_rows = _expand_whole_documents(settings, vector_rows, include_chunks=include_chunks)
-    elif not include_chunks:
-        vector_rows = []
+    vector_rows = _trim_context_units(_dedupe_context_units(vector_rows), max_context_tokens=max_context_tokens)
 
-    if retrieval_mode == "VectorRag":
-        final_rows = _trim_context_units(_dedupe_context_units(vector_rows), max_context_tokens=max_context_tokens)
+    if request.includeDocuments:
+        full_document_rows = list_context_units_for_collections(settings, collection_codes)
+        final_rows = _dedupe_context_units([*vector_rows, *full_document_rows])
     else:
-        recent_rows = get_recent_context_units(settings, collection_codes)
-        combined_rows = _dedupe_context_units([*vector_rows, *recent_rows])
-        final_rows = _trim_context_units(combined_rows, max_context_tokens=max_context_tokens)
-        if not vector_rows and not fallback_reason:
-            fallback_reason = "Hybrid retrieval used recency context because no vector matches were available."
+        final_rows = vector_rows
 
     return final_rows, {
         "retrievalMode": retrieval_mode,
@@ -1026,14 +1150,16 @@ class DomainAssistRequest(BaseModel):
 
 
 class DomainChildSuggestionRequest(BaseModel):
-    parentDomainCode: str
+    parentDomainCode: str | None = None
+    targetDomainType: str | None = None
     instruction: str
     draftText: str | None = None
     model: str | None = None
 
 
 class ExecuteDomainChildSuggestionRequest(BaseModel):
-    parentDomainCode: str
+    parentDomainCode: str | None = None
+    targetDomainType: str | None = None
     displayName: str
     description: str | None = None
     domainType: str
@@ -1070,6 +1196,12 @@ class AskRequest(BaseModel):
     shortMemoryCollectionCode: str
     longTermCollectionCodes: list[str] = []
     retrievalMode: str = "FullContext"
+    selectedDomainCode: str | None = None
+    includeDocuments: bool = True
+    includeRag: bool = True
+    includePolicies: bool = True
+    includeDomainContext: bool = True
+    includeControls: bool = True
     model: str | None = None
     history: list[dict[str, str]] = []
 
@@ -1113,6 +1245,7 @@ class PolicyDraftContentRequest(BaseModel):
     templatePath: str = "Policy/Policy-Template-1.01.md"
     model: str | None = None
     includedControlCodes: list[str] | None = None
+    controlGroups: list[dict[str, object]] | None = None
 
 
 class PolicyDraftLineRetryRequest(BaseModel):
@@ -1123,6 +1256,7 @@ class PolicyDraftLineRetryRequest(BaseModel):
     model: str | None = None
     controlCode: str | None = None
     includedControlCodes: list[str] | None = None
+    controlGroups: list[dict[str, object]] | None = None
 
 
 class ControlGroupingRequest(BaseModel):
@@ -1142,6 +1276,9 @@ class PolicyDraftControlStatementItem(BaseModel):
     statementText: str
     displayOrder: int = 0
     reviewStatus: str = "Pending"
+    groupLabel: str | None = None
+    groupDisplayOrder: int = 0
+    controlDisplayOrder: int = 0
 
 
 class SavePolicyDraftRequest(BaseModel):
@@ -1161,8 +1298,18 @@ class SavePolicyDraftRequest(BaseModel):
     controlStatements: list[PolicyDraftControlStatementItem] = []
 
 
+class PolicyControlExplanationRequest(BaseModel):
+    model: str | None = None
+    force: bool = False
+
+
 def _build_saved_policy_draft_payload(policy_data: dict[str, object]) -> dict[str, object]:
     policy = policy_data.get("policy") or {}
+    explanation_by_code = {
+        str(item.get("ControlCode") or ""): str(item.get("ExplanationText") or "")
+        for item in (policy_data.get("controlExplanations") or [])
+        if str(item.get("ControlCode") or "").strip()
+    }
     control_groups: dict[str, dict[str, object]] = {}
     for row in policy_data.get("controlStatements") or []:
         control_code = str(row.get("ControlCode") or "")
@@ -1174,6 +1321,10 @@ def _build_saved_policy_draft_payload(policy_data: dict[str, object]) -> dict[st
                 "domainDisplayName": str(policy.get("RootDomainName") or ""),
                 "controlTypeCode": str(row.get("ControlTypeCode") or ""),
                 "controlTypeName": str(row.get("ControlTypeName") or ""),
+                "groupLabel": str(row.get("GroupLabel") or ""),
+                "groupDisplayOrder": int(row.get("GroupDisplayOrder") or 0),
+                "controlDisplayOrder": int(row.get("ControlDisplayOrder") or 0),
+                "controlExplanation": explanation_by_code.get(control_code, ""),
                 "policyStatements": [],
             }
 
@@ -1210,7 +1361,14 @@ def _build_saved_policy_draft_payload(policy_data: dict[str, object]) -> dict[st
         "accountability": _section_items(policy_data.get("accountability") or []),
         "transparency": _section_items(policy_data.get("transparency") or []),
         "strategy": _section_items(policy_data.get("strategy") or []),
-        "controls": list(control_groups.values()),
+        "controls": sorted(
+            control_groups.values(),
+            key=lambda item: (
+                int(item.get("groupDisplayOrder") or 0),
+                int(item.get("controlDisplayOrder") or 0),
+                str(item.get("controlName") or ""),
+            ),
+        ),
         "consequences": _section_items(policy_data.get("consequences") or []),
     }
 
@@ -1510,6 +1668,60 @@ def _build_child_domain_suggestion_prompt_parts(
     return system_prompt, user_prompt
 
 
+def _build_root_domain_suggestion_prompt_parts(
+    target_domain_type: str,
+    instruction: str,
+    draft_text: str | None,
+    domain_types: list[dict[str, object]],
+    all_domains: list[dict[str, object]],
+) -> tuple[str, str]:
+    resolved_domain_type = _resolve_domain_type(domain_types, target_domain_type)
+    domain_type_code = str(resolved_domain_type.get("CODE") or "").strip().upper()
+    domain_type_name = str(resolved_domain_type.get("NAME") or domain_type_code).strip()
+    existing_roots = [
+        f"- {item.get('DisplayName')} ({item.get('DomainType') or 'Unknown type'})"
+        for item in all_domains
+        if not item.get("DomainParentId")
+        and str(item.get("DomainType") or "").strip().upper() == domain_type_name.upper()
+    ]
+    allowed_type_lines = [
+        f"- {item.get('CODE')}: {item.get('NAME')}"
+        for item in domain_types
+        if item.get("CODE")
+    ]
+
+    system_prompt = (
+        "You are helping organize a business domain map.\n\n"
+        'A domain is a specific area of knowledge, activity, control, or interest, often representing a field where someone has expertise or authority, such as "the financial domain".\n\n'
+        "Your task is to suggest exactly one new top-level domain under the selected domain type.\n\n"
+        "Return only valid JSON in this exact structure:\n"
+        "{\n"
+        '  "displayName": "Domain Title here",\n'
+        '  "description": "Context text here...",\n'
+        '  "domainType": "EXECUTIVE"\n'
+        "}\n\n"
+        "Rules:\n"
+        "- Return only JSON.\n"
+        "- Do not wrap the JSON in markdown fences.\n"
+        "- Do not include any explanation before or after the JSON.\n"
+        '- "displayName" must be a concise business domain title.\n'
+        '- "description" must explain what belongs in the domain and what underlying information, activities, responsibilities, or controls it covers.\n'
+        '- "domainType" must be exactly one of the allowed domain type codes shown below.\n'
+        "- Do not repeat or closely duplicate an existing top-level domain.\n"
+        f"- The domainType must resolve to {domain_type_code}.\n"
+        "- Prefer clarity and specificity over broad or generic wording."
+    )
+    user_prompt = (
+        f"Selected domain type name: {domain_type_name}\n"
+        f"Selected domain type code: {domain_type_code}\n"
+        f"Draft text:\n{draft_text or ''}\n\n"
+        f"Existing top-level domains in this type:\n{chr(10).join(existing_roots) if existing_roots else 'None'}\n\n"
+        f"Allowed domain types:\n{chr(10).join(allowed_type_lines) if allowed_type_lines else 'None'}\n\n"
+        f"User instruction:\n{instruction.strip()}\n"
+    )
+    return system_prompt, user_prompt
+
+
 def _build_child_domain_suggestion_prompt(
     domain_context: dict[str, object],
     instruction: str,
@@ -1561,7 +1773,10 @@ def _build_control_suggestion_prompt(
     )
 
     system_prompt = (
-        "You are helping design business controls for an internal control manager.\n\n"
+        "Use the selected domain or subdomain as the starting point for control creation. "
+        "Assume the mandate establishes the department's purpose, authority, responsibilities, "
+        "and expected outcomes. Create controls that define what must be managed, assigned, "
+        "documented, evidenced, and reviewed through policy, procedure, and role requirements.\n\n"
         "Return only valid JSON in this exact structure:\n"
         "{\n"
         '  "suggestions": [\n'
@@ -1636,6 +1851,28 @@ def _build_ai_control_grouping_prompt(
         f"Root domain: {root_domain.get('DisplayName') or ''} [{root_domain.get('DomainCode') or ''}]\n\n"
         f"Controls:\n{chr(10).join(control_lines) if control_lines else 'None'}\n"
     )
+
+
+def _normalize_policy_control_groups(raw_groups: list[dict[str, object]] | None) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    for item in raw_groups or []:
+        if not isinstance(item, dict):
+            continue
+        group_label = str(item.get("groupLabel") or "").strip() or "Ungrouped Controls"
+        control_codes = [
+            str(code).strip().upper()
+            for code in (item.get("controlCodes") or [])
+            if str(code).strip()
+        ]
+        if not control_codes:
+            continue
+        normalized.append(
+            {
+                "groupLabel": group_label,
+                "controlCodes": list(dict.fromkeys(control_codes)),
+            }
+        )
+    return normalized
 
 
 def _build_control_suggestion_prompt_text(
@@ -2005,6 +2242,10 @@ def _build_policy_generation_prompt(
         "Rules:\n"
         "- Use only the supplied domain, child-domain, and control data.\n"
         "- Do not invent external laws, standards, frameworks, departments, committees, or references.\n"
+        "- Use clear professional language for workplace readers rather than legal drafting style.\n"
+        "- Prefer direct sentence structure and practical wording that informed staff can grasp quickly.\n"
+        "- Avoid legal jargon, archaic wording, and unnecessarily dense phrasing unless a precise term is required.\n"
+        "- Keep the draft sound, accurate, and defensible while making it easier for non-lawyers to follow.\n"
         "- The output is a completed policy draft, not a template.\n"
         "- Preserve the template structure and headings exactly as given.\n"
         "- Replace the template title with a final policy title based on the selected root domain.\n"
@@ -2054,6 +2295,7 @@ def _build_policy_content_prompt(
     branch_domains: list[dict[str, object]],
     branch_controls: list[dict[str, object]],
     all_domains: list[dict[str, object]],
+    control_groups: list[dict[str, object]] | None = None,
 ) -> tuple[str, str]:
     root_breadcrumb = _domain_breadcrumb(root_domain, all_domains)
     branch_lines = [
@@ -2064,6 +2306,33 @@ def _build_policy_content_prompt(
         f"- controlCode={item.get('ControlCode')} | controlName={item.get('DisplayName')} | domain={item.get('DomainDisplayName')} ({item.get('DomainCode')}) | type={item.get('ControlTypeName')} ({item.get('ControlTypeCode')}) | description={item.get('Description') or ''} | objective={item.get('ControlObjective') or ''} | evidence={item.get('EvidenceExpectation') or ''}"
         for item in branch_controls
     ]
+    grouped_control_lines = []
+    control_lookup = {
+        str(item.get("ControlCode") or "").strip().upper(): item
+        for item in branch_controls
+        if str(item.get("ControlCode") or "").strip()
+    }
+    for group in control_groups or []:
+        codes = [
+            str(code).strip().upper()
+            for code in (group.get("controlCodes") or [])
+            if str(code).strip()
+        ]
+        grouped_controls = [
+            control_lookup[code]
+            for code in codes
+            if code in control_lookup
+        ]
+        if not grouped_controls:
+            continue
+        grouped_control_lines.append(
+            f"- {group.get('groupLabel') or 'Ungrouped Controls'}:\n"
+            + "\n".join(
+                "  "
+                + f"* controlCode={item.get('ControlCode')} | controlName={item.get('DisplayName')} | type={item.get('ControlTypeName')} ({item.get('ControlTypeCode')}) | domain={item.get('DomainDisplayName')} | objective={item.get('ControlObjective') or ''}"
+                for item in grouped_controls
+            )
+        )
 
     system_prompt = (
         "You are drafting the content sections for an internal policy from structured local organizational data.\n\n"
@@ -2072,6 +2341,10 @@ def _build_policy_content_prompt(
         "Do not invent external laws, standards, frameworks, departments, committees, or references.\n"
         "Treat the template as structural guidance only.\n"
         "Write concise, policy-ready sentences.\n"
+        "Use clear professional language for workplace readers rather than legal drafting style.\n"
+        "Prefer direct sentence structure and practical wording that informed staff can grasp quickly.\n"
+        "Avoid legal jargon, archaic wording, and unnecessarily dense phrasing unless a precise term is required.\n"
+        "Keep the content sound, accurate, and defensible while making it easier for non-lawyers to follow.\n"
         "Section definitions:\n"
         "- Objectives: short outcome statements describing what this policy is meant to achieve.\n"
         "- Principles: enduring beliefs, values, or decision standards that guide judgment and behavior. Principles are not requirements, directives, or enforcement statements.\n"
@@ -2088,6 +2361,8 @@ def _build_policy_content_prompt(
         "Strategy should reinforce how the organization approaches the domain in practical terms.\n"
         "Every control must appear exactly once in the controls array.\n"
         "Keep controls in the supplied order.\n"
+        "Use the supplied control groups as drafting context so related controls read cohesively.\n"
+        "Group labels help shape tone and consistency, but every control still needs its own policy statements.\n"
         "Write 1 to 2 objective statements.\n"
         "Write 3 to 4 principles.\n"
         "Write exactly 1 accountability statement.\n"
@@ -2121,6 +2396,7 @@ def _build_policy_content_prompt(
         f"- description={root_domain.get('Description') or ''}\n\n"
         f"Branch domains:\n{chr(10).join(branch_lines) if branch_lines else 'None'}\n\n"
         f"Branch controls in required order:\n{chr(10).join(control_lines) if control_lines else 'None'}\n\n"
+        f"Control groups:\n{chr(10).join(grouped_control_lines) if grouped_control_lines else 'None'}\n\n"
         "Draft only the policy content sections in the requested JSON format."
     )
     return system_prompt, user_prompt
@@ -2133,6 +2409,7 @@ def _build_policy_line_retry_prompt(
     branch_domains: list[dict[str, object]],
     branch_controls: list[dict[str, object]],
     all_domains: list[dict[str, object]],
+    control_groups: list[dict[str, object]] | None,
     section_key: str,
     current_text: str,
     control_code: str | None,
@@ -2162,6 +2439,18 @@ def _build_policy_line_retry_prompt(
         f"- {_domain_breadcrumb(domain, all_domains)} | code={domain.get('DomainCode')} | type={domain.get('DomainType') or 'Unknown'}"
         for domain in branch_domains
     ]
+    target_group_label = "Ungrouped Controls"
+    if control_code:
+        target_control_code = str(control_code).strip().upper()
+        for group in control_groups or []:
+            group_codes = {
+                str(code).strip().upper()
+                for code in (group.get("controlCodes") or [])
+                if str(code).strip()
+            }
+            if target_control_code in group_codes:
+                target_group_label = str(group.get("groupLabel") or "").strip() or target_group_label
+                break
     control_context = "None"
     if target_control:
         control_context = (
@@ -2171,7 +2460,8 @@ def _build_policy_line_retry_prompt(
             f"type={target_control.get('ControlTypeName')} ({target_control.get('ControlTypeCode')}) | "
             f"description={target_control.get('Description') or ''} | "
             f"objective={target_control.get('ControlObjective') or ''} | "
-            f"evidence={target_control.get('EvidenceExpectation') or ''}"
+            f"evidence={target_control.get('EvidenceExpectation') or ''} | "
+            f"group={target_group_label}"
         )
 
     return (
@@ -2180,6 +2470,10 @@ def _build_policy_line_retry_prompt(
         "Do not number it. Do not add bullets. Do not add quotation marks.\n"
         "Use only the supplied local domain, branch, control, and template context.\n"
         "Do not invent external laws, standards, frameworks, departments, or references.\n\n"
+        "Use clear professional language for workplace readers rather than legal drafting style.\n"
+        "Prefer direct sentence structure and practical wording that informed staff can grasp quickly.\n"
+        "Avoid legal jargon, archaic wording, and unnecessarily dense phrasing unless a precise term is required.\n"
+        "Keep the line sound, accurate, and defensible while making it easier for non-lawyers to follow.\n\n"
         "Section definitions:\n"
         "- Objectives: short outcome statements describing what this policy is meant to achieve.\n"
         "- Principles: enduring beliefs, values, or decision standards that guide judgment and behavior. Principles are not requirements, directives, or enforcement statements.\n"
@@ -2226,6 +2520,7 @@ def _normalize_policy_content_draft(
     branch_controls: list[dict[str, object]],
     model_name: str,
     all_domains: list[dict[str, object]],
+    control_groups: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     controls_by_code = {
         str(item.get("ControlCode") or "").strip().lower(): item
@@ -2242,8 +2537,55 @@ def _normalize_policy_content_draft(
             if control_code:
                 parsed_control_lookup[control_code] = item
 
+    group_label_by_control_code: dict[str, str] = {}
+    for group in control_groups or []:
+        group_label = str(group.get("groupLabel") or "").strip() or "Ungrouped Controls"
+        for code in group.get("controlCodes") or []:
+            normalized_code = str(code).strip().lower()
+            if normalized_code:
+                group_label_by_control_code[normalized_code] = group_label
+
+    ordered_controls: list[dict[str, object]] = []
+    if control_groups:
+        seen_codes: set[str] = set()
+        for group_index, group in enumerate(control_groups, start=1):
+            for control_index, code in enumerate(group.get("controlCodes") or [], start=1):
+                lookup_key = str(code).strip().lower()
+                control = controls_by_code.get(lookup_key)
+                if control is None or lookup_key in seen_codes:
+                    continue
+                seen_codes.add(lookup_key)
+                ordered_controls.append(
+                    {
+                        "control": control,
+                        "groupDisplayOrder": group_index * 10,
+                        "controlDisplayOrder": control_index * 10,
+                    }
+                )
+
+        for control in branch_controls:
+            control_code_key = str(control.get("ControlCode") or "").strip().lower()
+            if control_code_key and control_code_key not in seen_codes:
+                ordered_controls.append(
+                    {
+                        "control": control,
+                        "groupDisplayOrder": 9990,
+                        "controlDisplayOrder": (len(ordered_controls) + 1) * 10,
+                    }
+                )
+    else:
+        for control_index, control in enumerate(branch_controls, start=1):
+            ordered_controls.append(
+                {
+                    "control": control,
+                    "groupDisplayOrder": 0,
+                    "controlDisplayOrder": control_index * 10,
+                }
+            )
+
     normalized_controls: list[dict[str, object]] = []
-    for control in branch_controls:
+    for ordered_control in ordered_controls:
+        control = ordered_control["control"]
         control_code = str(control.get("ControlCode") or "").strip()
         parsed_item = parsed_control_lookup.get(control_code.lower(), {})
         normalized_controls.append(
@@ -2254,6 +2596,9 @@ def _normalize_policy_content_draft(
                 "domainDisplayName": str(control.get("DomainDisplayName") or ""),
                 "controlTypeCode": str(control.get("ControlTypeCode") or ""),
                 "controlTypeName": str(control.get("ControlTypeName") or ""),
+                "groupLabel": group_label_by_control_code.get(control_code.lower(), ""),
+                "groupDisplayOrder": int(ordered_control["groupDisplayOrder"] or 0),
+                "controlDisplayOrder": int(ordered_control["controlDisplayOrder"] or 0),
                 "policyStatements": _coerce_text_list(parsed_item.get("policyStatements"), minimum=1, maximum=3),
             }
         )
@@ -2431,34 +2776,85 @@ def _build_saved_policy_html(policy_data: dict[str, object]) -> str:
     template_name = html.escape(str(policy.get("TemplateName") or "") or "None")
     model_name = html.escape(str(policy.get("SourceModelName") or "") or "Unknown")
     updated_at = html.escape(str(policy.get("UpdatedAtUtc") or policy.get("CreatedAtUtc") or ""))
+    policy_id = html.escape(str(policy.get("PolicyId") or ""))
+    explanation_by_code = {
+        str(item.get("ControlCode") or ""): str(item.get("ExplanationText") or "")
+        for item in (policy_data.get("controlExplanations") or [])
+        if str(item.get("ControlCode") or "").strip()
+    }
 
     control_rows = policy_data.get("controlStatements") or []
     grouped_controls: dict[str, dict[str, object]] = {}
     for row in control_rows:
+        group_label = str(row.get("GroupLabel") or "").strip() or "Ungrouped Controls"
         control_code = str(row.get("ControlCode") or "")
-        if control_code not in grouped_controls:
-            grouped_controls[control_code] = {
+        group_key = f"{int(row.get('GroupDisplayOrder') or 0):08d}|{group_label.lower()}"
+        control_key = f"{group_key}|{int(row.get('ControlDisplayOrder') or 0):08d}|{control_code.lower()}"
+        if control_key not in grouped_controls:
+            grouped_controls[control_key] = {
+                "GroupLabel": group_label,
+                "GroupDisplayOrder": int(row.get("GroupDisplayOrder") or 0),
                 "ControlCode": control_code,
                 "ControlName": str(row.get("ControlName") or ""),
                 "ControlTypeName": str(row.get("ControlTypeName") or ""),
                 "ControlTypeCode": str(row.get("ControlTypeCode") or ""),
+                "ControlDisplayOrder": int(row.get("ControlDisplayOrder") or 0),
                 "Rows": [],
             }
-        grouped_controls[control_code]["Rows"].append(row)
+        grouped_controls[control_key]["Rows"].append(row)
 
     control_html_parts: list[str] = []
     if grouped_controls:
-        for group in grouped_controls.values():
-            header = html.escape(str(group.get("ControlName") or "Control"))
-            detail = html.escape(
-                f"{group.get('ControlTypeName') or ''} ({group.get('ControlTypeCode') or ''}) | {group.get('ControlCode') or ''}"
-            )
+        controls_by_group: dict[str, list[dict[str, object]]] = {}
+        for control in grouped_controls.values():
+            group_key = f"{int(control.get('GroupDisplayOrder') or 0):08d}|{str(control.get('GroupLabel') or '').lower()}"
+            controls_by_group.setdefault(group_key, []).append(control)
+
+        for controls in controls_by_group.values():
+            if not controls:
+                continue
+
+            group_label = html.escape(str(controls[0].get("GroupLabel") or "Ungrouped Controls"))
+            control_cards: list[str] = []
+            for group in sorted(
+                controls,
+                key=lambda item: (
+                    int(item.get("ControlDisplayOrder") or 0),
+                    str(item.get("ControlName") or ""),
+                ),
+            ):
+                header = html.escape(str(group.get("ControlName") or "Control"))
+                control_code = str(group.get("ControlCode") or "")
+                detail = html.escape(
+                    f"{group.get('ControlTypeName') or ''} ({group.get('ControlTypeCode') or ''}) | {control_code}"
+                )
+                explanation = html.escape(explanation_by_code.get(control_code, ""))
+                has_explanation = bool(explanation.strip())
+                control_cards.append(
+                    f"""
+                    <section class="control-card">
+                      <div class="control-title-row">
+                        <h3>{header}</h3>
+                        <button class="info-button {'has-info' if has_explanation else 'no-info'}"
+                                type="button"
+                                data-policy-id="{policy_id}"
+                                data-control-code="{html.escape(control_code)}"
+                                onclick="toggleControlExplanation(this)"
+                                oncontextmenu="showExplanationMenu(event, this)">{'i' if has_explanation else '+'}</button>
+                      </div>
+                      <div class="control-meta">{detail}</div>
+                      <div class="control-explanation"
+                           data-control-code="{html.escape(control_code)}">{explanation}</div>
+                      {_render_policy_line_items(group.get("Rows") or [])}
+                    </section>
+                    """
+                )
+
             control_html_parts.append(
                 f"""
-                <section class="control-card">
-                  <h3>{header}</h3>
-                  <div class="control-meta">{detail}</div>
-                  {_render_policy_line_items(group.get("Rows") or [])}
+                <section class="control-group-card">
+                  <h3 class="control-group-title">{group_label}</h3>
+                  {''.join(control_cards)}
                 </section>
                 """
             )
@@ -2504,7 +2900,7 @@ def _build_saved_policy_html(policy_data: dict[str, object]) -> str:
       gap: 10px;
       margin-top: 14px;
     }}
-    .meta-card, .section-card, .control-card {{
+    .meta-card, .section-card, .control-card, .control-group-card {{
       background: #ffffff;
       border: 1px solid #d6d0c4;
       border-radius: 6px;
@@ -2521,7 +2917,7 @@ def _build_saved_policy_html(policy_data: dict[str, object]) -> str:
       font-size: 14px;
       font-weight: 600;
     }}
-    .section-card, .control-card {{
+    .section-card, .control-card, .control-group-card {{
       padding: 14px 16px;
       margin-top: 14px;
     }}
@@ -2533,11 +2929,169 @@ def _build_saved_policy_html(policy_data: dict[str, object]) -> str:
       margin: 0;
       font-size: 17px;
     }}
+    .control-group-card {{
+      background: #fbf9f4;
+      border-color: #ddd4c6;
+    }}
+    .control-group-title {{
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: #7a5c8e;
+    }}
+    .control-group-card .control-card {{
+      margin-top: 10px;
+      background: #ffffff;
+    }}
+    .control-title-row {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }}
     .control-meta {{
       margin-top: 4px;
       margin-bottom: 10px;
       color: #5b6770;
       font-size: 12px;
+    }}
+    .info-button {{
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 1px solid #d6d0c4;
+      background: #f8f6f1;
+      color: #315b73;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    .info-button.has-info {{
+      background: #e9f3f8;
+      border-color: #9fb8c7;
+      color: #204b62;
+    }}
+    .info-button.no-info {{
+      background: #f8f6f1;
+      border-style: dashed;
+      color: #7b8790;
+    }}
+    .control-explanation {{
+      display: none;
+    }}
+    .control-card {{
+      position: relative;
+    }}
+    .control-title-row {{
+      position: relative;
+    }}
+    .info-bubble {{
+      position: absolute;
+      z-index: 1100;
+      display: none;
+      width: min(320px, calc(100vw - 64px));
+      background: #e2f0f8;
+      border: 2px solid #24465c;
+      border-radius: 18px;
+      box-shadow: 0 16px 28px rgba(24, 52, 74, 0.18);
+      overflow: visible;
+    }}
+    .info-bubble.is-visible {{
+      display: block;
+    }}
+    .info-bubble::after {{
+      content: "";
+      position: absolute;
+      right: 26px;
+      top: -9px;
+      width: 16px;
+      height: 16px;
+      background: #e2f0f8;
+      border-top: 2px solid #24465c;
+      border-left: 2px solid #24465c;
+      transform: rotate(45deg);
+    }}
+    .info-bubble.above::after {{
+      top: auto;
+      bottom: -9px;
+      border-top: 0;
+      border-left: 0;
+      border-right: 2px solid #24465c;
+      border-bottom: 2px solid #24465c;
+    }}
+    .info-bubble-header {{
+      display: flex;
+      justify-content: flex-end;
+      padding: 8px 10px 0;
+    }}
+    .info-bubble-close {{
+      border: 0;
+      background: transparent;
+      color: #446175;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+    }}
+    .info-bubble-body {{
+      padding: 0 16px 16px;
+      color: #263746;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }}
+    .info-bubble-status {{
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px 10px;
+      color: #446175;
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    .info-bubble-status.is-visible {{
+      display: flex;
+    }}
+    .info-bubble-spinner {{
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(68, 97, 117, 0.25);
+      border-top-color: #446175;
+      border-radius: 999px;
+      animation: info-bubble-spin 0.85s linear infinite;
+    }}
+    .info-button.is-loading {{
+      background: #dbeaf3;
+      color: #446175;
+      cursor: wait;
+      opacity: 0.9;
+    }}
+    @keyframes info-bubble-spin {{
+      from {{ transform: rotate(0deg); }}
+      to {{ transform: rotate(360deg); }}
+    }}
+    .explanation-menu {{
+      position: fixed;
+      z-index: 1000;
+      display: none;
+      min-width: 180px;
+      background: #ffffff;
+      border: 1px solid #d6d0c4;
+      border-radius: 6px;
+      box-shadow: 0 10px 24px rgba(24, 52, 74, 0.16);
+      overflow: hidden;
+    }}
+    .explanation-menu button {{
+      width: 100%;
+      border: 0;
+      background: #ffffff;
+      text-align: left;
+      padding: 10px 12px;
+      cursor: pointer;
+      color: #263746;
+    }}
+    .explanation-menu button:hover {{
+      background: #f3f1ec;
     }}
     ol {{
       margin: 0;
@@ -2563,6 +3117,19 @@ def _build_saved_policy_html(policy_data: dict[str, object]) -> str:
   </style>
 </head>
 <body>
+  <div id="explanationMenu" class="explanation-menu">
+    <button type="button" onclick="regenerateCurrentExplanation()">Regenerate explanation</button>
+  </div>
+  <div id="infoBubble" class="info-bubble" role="dialog" aria-modal="false" aria-label="Control explanation">
+    <div class="info-bubble-header">
+      <button type="button" class="info-bubble-close" onclick="hideInfoBubble()" aria-label="Close explanation">x</button>
+    </div>
+    <div id="infoBubbleStatus" class="info-bubble-status">
+      <span class="info-bubble-spinner" aria-hidden="true"></span>
+      <span id="infoBubbleStatusText">Loading explanation...</span>
+    </div>
+    <div id="infoBubbleBody" class="info-bubble-body"></div>
+  </div>
   <div class="page">
     <div class="hero">
       <h1>{policy_title}</h1>
@@ -2634,8 +3201,229 @@ def _build_saved_policy_html(policy_data: dict[str, object]) -> str:
       {_render_policy_line_items(policy_data.get("consequences") or [])}
     </section>
   </div>
+  <script>
+    let currentExplanationButton = null;
+    let currentBubbleButton = null;
+
+    function hideExplanationMenu() {{
+      const menu = document.getElementById('explanationMenu');
+      menu.style.display = 'none';
+      currentExplanationButton = null;
+    }}
+
+    function hideInfoBubble() {{
+      const bubble = document.getElementById('infoBubble');
+      bubble.classList.remove('is-visible');
+      setInfoBubbleBusy(false);
+      document.body.appendChild(bubble);
+      currentBubbleButton = null;
+    }}
+
+    function setInfoBubbleBusy(isBusy, text) {{
+      const status = document.getElementById('infoBubbleStatus');
+      const statusText = document.getElementById('infoBubbleStatusText');
+      if (statusText && text) {{
+        statusText.textContent = text;
+      }}
+      if (status) {{
+        status.classList.toggle('is-visible', !!isBusy);
+      }}
+      if (currentBubbleButton) {{
+        currentBubbleButton.classList.toggle('is-loading', !!isBusy);
+        currentBubbleButton.disabled = !!isBusy;
+        if (isBusy) {{
+          currentBubbleButton.textContent = '...';
+        }} else {{
+          currentBubbleButton.textContent = currentBubbleButton.classList.contains('has-info') ? 'i' : '+';
+        }}
+      }}
+    }}
+
+    function positionInfoBubble(button) {{
+      const bubble = document.getElementById('infoBubble');
+      const card = button.closest('.control-card');
+      if (!card) {{
+        return;
+      }}
+      card.appendChild(bubble);
+      const buttonRect = button.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      const bubbleWidth = Math.min(320, Math.max(220, cardRect.width - 24));
+      const bubbleHeight = bubble.offsetHeight || 160;
+      const localButtonRight = buttonRect.right - cardRect.left;
+      const localButtonTop = buttonRect.top - cardRect.top;
+      const localButtonBottom = buttonRect.bottom - cardRect.top;
+      let left = localButtonRight - bubbleWidth + 12;
+      left = Math.max(12, Math.min(left, Math.max(12, cardRect.width - bubbleWidth - 12)));
+
+      const viewportMargin = 16;
+      const spaceBelowViewport = window.innerHeight - buttonRect.bottom - viewportMargin;
+      const spaceAboveViewport = buttonRect.top - viewportMargin;
+      const showAbove = spaceBelowViewport < bubbleHeight + 24 && spaceAboveViewport > spaceBelowViewport;
+
+      bubble.classList.toggle('above', showAbove);
+      bubble.style.width = `${{bubbleWidth}}px`;
+      bubble.style.left = `${{left}}px`;
+      bubble.style.top = showAbove
+        ? `${{Math.max(12, localButtonTop - bubbleHeight - 16)}}px`
+        : `${{localButtonBottom + 14}}px`;
+    }}
+
+    async function loadControlExplanation(button, forceRefresh) {{
+      const policyId = button.dataset.policyId;
+      const controlCode = button.dataset.controlCode;
+      const explanation = document.querySelector(`.control-explanation[data-control-code="${{CSS.escape(controlCode)}}"]`);
+      const bubble = document.getElementById('infoBubble');
+      const bubbleBody = document.getElementById('infoBubbleBody');
+      if (!explanation) {{
+        return;
+      }}
+
+      if (!forceRefresh && explanation.dataset.loaded === 'true') {{
+        if (currentBubbleButton === button && bubble.classList.contains('is-visible')) {{
+          hideInfoBubble();
+          return;
+        }}
+        bubbleBody.textContent = explanation.textContent || 'No explanation available.';
+        bubble.classList.add('is-visible');
+        currentBubbleButton = button;
+        setInfoBubbleBusy(false);
+        positionInfoBubble(button);
+        return;
+      }}
+
+      bubbleBody.textContent = '';
+      bubble.classList.add('is-visible');
+      currentBubbleButton = button;
+      setInfoBubbleBusy(true, forceRefresh ? 'Refreshing explanation...' : 'Loading explanation...');
+      positionInfoBubble(button);
+
+      const response = await fetch(`/policies/${{encodeURIComponent(policyId)}}/controls/${{encodeURIComponent(controlCode)}}/explanation`, {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ force: !!forceRefresh }})
+      }});
+      if (!response.ok) {{
+        let errorText = 'Explanation unavailable.';
+        try {{
+          const payload = await response.json();
+          errorText = payload.detail || payload.error || errorText;
+        }} catch {{
+        }}
+        setInfoBubbleBusy(false);
+        bubbleBody.textContent = errorText;
+        return;
+      }}
+
+      const payload = await response.json();
+      explanation.textContent = payload.ExplanationText || payload.explanationText || 'No explanation available.';
+      explanation.dataset.loaded = 'true';
+      setInfoBubbleBusy(false);
+      bubbleBody.textContent = explanation.textContent;
+      positionInfoBubble(button);
+      button.textContent = 'i';
+      button.classList.remove('no-info');
+      button.classList.add('has-info');
+    }}
+
+    function toggleControlExplanation(button) {{
+      hideExplanationMenu();
+      loadControlExplanation(button, false);
+    }}
+
+    function showExplanationMenu(event, button) {{
+      event.preventDefault();
+      currentExplanationButton = button;
+      const menu = document.getElementById('explanationMenu');
+      menu.style.left = `${{event.clientX}}px`;
+      menu.style.top = `${{event.clientY}}px`;
+      menu.style.display = 'block';
+    }}
+
+    function regenerateCurrentExplanation() {{
+      if (!currentExplanationButton) {{
+        hideExplanationMenu();
+        return;
+      }}
+      loadControlExplanation(currentExplanationButton, true);
+      const menu = document.getElementById('explanationMenu');
+      menu.style.display = 'none';
+    }}
+
+    window.addEventListener('resize', () => {{
+      if (currentBubbleButton) {{
+        positionInfoBubble(currentBubbleButton);
+      }}
+    }});
+
+    document.addEventListener('click', (event) => {{
+      const menu = document.getElementById('explanationMenu');
+      const bubble = document.getElementById('infoBubble');
+      if (!menu.contains(event.target)) {{
+        hideExplanationMenu();
+      }}
+      if (bubble.classList.contains('is-visible')
+          && !bubble.contains(event.target)
+          && !menu.contains(event.target)
+          && !event.target.closest('.info-button')) {{
+        hideInfoBubble();
+      }}
+    }});
+  </script>
 </body>
 </html>"""
+
+
+def _build_policy_control_explanation_prompt(policy_data: dict[str, object], control_code: str) -> str:
+    policy = policy_data.get("policy") or {}
+    statements = [
+        row for row in (policy_data.get("controlStatements") or [])
+        if str(row.get("ControlCode") or "").strip().lower() == str(control_code or "").strip().lower()
+    ]
+    if not statements:
+        raise ValueError(f"No policy control statements were found for control '{control_code}'.")
+
+    first_row = statements[0]
+    statement_lines = "\n".join(
+        f"- {str(row.get('StatementText') or '').strip()}"
+        for row in statements
+        if str(row.get("StatementText") or "").strip()
+    )
+
+    return (
+        "Write a very brief explanation for a policy control. "
+        "Keep it to 2 or 3 sentences. Explain what the control is trying to do and why it matters. "
+        "Use clear professional language for workplace readers rather than legal drafting style. "
+        "Prefer direct sentence structure and practical wording that informed staff can grasp quickly. "
+        "Avoid legal jargon, archaic wording, and unnecessarily dense phrasing unless a precise term is required. "
+        "Keep the explanation accurate and defensible for non-lawyers. "
+        "Do not use bullets, headings, legal wording, or the phrase 'plain-language'.\n\n"
+        f"Policy title: {str(policy.get('PolicyTitle') or '')}\n"
+        f"Root domain: {str(policy.get('RootDomainName') or '')} ({str(policy.get('RootDomainCode') or '')})\n"
+        f"Control name: {str(first_row.get('ControlName') or '')}\n"
+        f"Control code: {str(first_row.get('ControlCode') or '')}\n"
+        f"Control type: {str(first_row.get('ControlTypeName') or '')} ({str(first_row.get('ControlTypeCode') or '')})\n"
+        f"Group: {str(first_row.get('GroupLabel') or '')}\n\n"
+        f"Policy statements for this control:\n{statement_lines}"
+    )
+
+
+def _clean_policy_control_explanation(text: str) -> str:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:text)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    cleaned = " ".join(cleaned.split())
+    cleaned = re.sub(
+        r"^\s*(?:here(?:'s| is)\s+(?:a|an)\s+(?:brief\s+)?(?:simple\s+)?(?:plain-language\s+)?explanation(?:\s+for\s+the)?[^:]*:\s*)",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\bplain-language\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" :.-")
+    return cleaned
 
 
 def _extract_json_object(raw_text: str) -> dict[str, object]:
@@ -2721,6 +3509,45 @@ def _build_child_domain_insert_preview(
         "JOIN dbo.DomainTypes dt\n"
         "    ON dt.CODE = @DomainTypeCode\n"
         "WHERE parent.DomainCode = @ParentDomainCode AND parent.Status = 'Active';"
+    )
+
+
+def _build_root_domain_insert_preview(
+    domain_type_code: str,
+    domain_code: str,
+    display_name: str,
+    description: str | None,
+) -> str:
+    type_literal = _sql_nvarchar_literal(domain_type_code)
+    code_literal = _sql_nvarchar_literal(domain_code)
+    name_literal = _sql_nvarchar_literal(display_name.strip())
+    description_literal = _sql_nvarchar_literal(description.strip() if description else None)
+
+    return (
+        f"DECLARE @DomainTypeCode NVARCHAR(50) = {type_literal};\n\n"
+        "INSERT INTO dbo.Domains (\n"
+        "    DomainParentId,\n"
+        "    DomainTypeId,\n"
+        "    DomainOrientationId,\n"
+        "    DisplayOrder,\n"
+        "    DomainCode,\n"
+        "    DisplayName,\n"
+        "    Description\n"
+        ")\n"
+        "SELECT\n"
+        "    NULL,\n"
+        "    dt.ID,\n"
+        "    NULL,\n"
+        "    COALESCE((\n"
+        "        SELECT MAX(sibling.DisplayOrder) + 10\n"
+        "        FROM dbo.Domains sibling\n"
+        "        WHERE sibling.Status = 'Active' AND sibling.DomainParentId IS NULL\n"
+        "    ), 10),\n"
+        f"    {code_literal},\n"
+        f"    {name_literal},\n"
+        f"    {description_literal}\n"
+        "FROM dbo.DomainTypes dt\n"
+        "WHERE dt.CODE = @DomainTypeCode;"
     )
 
 
@@ -2884,6 +3711,7 @@ def create_app() -> FastAPI:
             all_domains = list_domains(settings)
             context = get_control_suggestion_context(settings, request.domainCode)
             branch_controls = list_controls_for_branch(settings, request.domainCode)
+            control_groups = _normalize_policy_control_groups(request.controlGroups)
             included_control_codes = None if request.includedControlCodes is None else {
                 str(code).strip().upper()
                 for code in request.includedControlCodes
@@ -2904,6 +3732,7 @@ def create_app() -> FastAPI:
                 branch_domains,
                 branch_controls,
                 all_domains,
+                control_groups,
             )
             payload = _generate_with_ollama(
                 settings,
@@ -2918,6 +3747,7 @@ def create_app() -> FastAPI:
                 branch_controls,
                 str(payload.get("model") or selected_model),
                 all_domains,
+                control_groups,
             )
             normalized["metrics"] = _extract_metrics(payload, model=selected_model)
             return normalized
@@ -2932,6 +3762,7 @@ def create_app() -> FastAPI:
             all_domains = list_domains(settings)
             context = get_control_suggestion_context(settings, request.domainCode)
             branch_controls = list_controls_for_branch(settings, request.domainCode)
+            control_groups = _normalize_policy_control_groups(request.controlGroups)
             included_control_codes = None if request.includedControlCodes is None else {
                 str(code).strip().upper()
                 for code in request.includedControlCodes
@@ -2952,6 +3783,7 @@ def create_app() -> FastAPI:
                 branch_domains=branch_domains,
                 branch_controls=branch_controls,
                 all_domains=all_domains,
+                control_groups=control_groups,
                 section_key=request.sectionKey,
                 current_text=request.currentText,
                 control_code=request.controlCode,
@@ -3018,6 +3850,59 @@ def create_app() -> FastAPI:
             return _build_saved_policy_draft_payload(policy_data)
         except HTTPException:
             raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/policies/{policyId}/draft")
+    def load_policy_draft_by_id(policyId: str) -> dict[str, object]:
+        try:
+            policy_data = get_policy_presentation_data(settings, policyId)
+            return _build_saved_policy_draft_payload(policy_data)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/policies/{policyId}/controls/{controlCode}/explanation")
+    def generate_policy_control_explanation(
+        policyId: str,
+        controlCode: str,
+        request: PolicyControlExplanationRequest,
+    ) -> dict[str, object]:
+        try:
+            policy_data = get_policy_presentation_data(settings, policyId)
+            existing = {
+                str(item.get("ControlCode") or "").strip().lower(): item
+                for item in list_policy_control_explanations(settings, policyId)
+            }.get(str(controlCode or "").strip().lower())
+            if existing and not request.force:
+                return existing
+
+            selected_model = request.model or settings.ollama_chat_model
+            prompt = _build_policy_control_explanation_prompt(policy_data, controlCode)
+            payload = _generate_with_ollama(
+                settings,
+                prompt,
+                model=selected_model,
+                trace_label="policy.control-explanation",
+            )
+            explanation_text = _clean_policy_control_explanation(str(payload.get("response") or ""))
+            if not explanation_text:
+                raise ValueError("The model did not return an explanation.")
+
+            saved = upsert_policy_control_explanation(
+                settings,
+                policy_id=policyId,
+                control_code=controlCode,
+                explanation_text=explanation_text,
+                source_model_name=selected_model,
+            )
+            return saved
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/policies/{policyId}")
+    def remove_policy(policyId: str) -> dict[str, object]:
+        try:
+            return delete_policy(settings, policyId)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -3161,7 +4046,7 @@ def create_app() -> FastAPI:
                 if normalized_codes:
                     normalized_groups.append(
                         {
-                            "label": label,
+                            "groupLabel": label,
                             "controlCodes": normalized_codes,
                         }
                     )
@@ -3175,7 +4060,7 @@ def create_app() -> FastAPI:
                 fallback_label = "Other Controls"
                 normalized_groups.append(
                     {
-                        "label": fallback_label,
+                        "groupLabel": fallback_label,
                         "controlCodes": unassigned_codes,
                     }
                 )
@@ -3241,6 +4126,13 @@ def create_app() -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.delete("/controls/{controlId}")
+    def remove_control(controlId: str) -> dict[str, object]:
+        try:
+            return delete_control(settings, controlId)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/domains")
     def add_domain(request: CreateDomainRequest) -> dict[str, object]:
         return create_domain(
@@ -3299,14 +4191,28 @@ def create_app() -> FastAPI:
         if not instruction:
             raise HTTPException(status_code=400, detail="Instruction is required.")
 
-        domain_context = get_domain_assist_context(settings, request.parentDomainCode)
         domain_types = list_domain_types(settings)
-        compiled_prompt = _build_child_domain_suggestion_prompt(
-            domain_context,
-            instruction,
-            request.draftText,
-            domain_types,
-        )
+        if request.parentDomainCode:
+            domain_context = get_domain_assist_context(settings, request.parentDomainCode)
+            compiled_prompt = _build_child_domain_suggestion_prompt(
+                domain_context,
+                instruction,
+                request.draftText,
+                domain_types,
+            )
+            root_mode = False
+        else:
+            if not request.targetDomainType:
+                raise HTTPException(status_code=400, detail="A parent domain code or target domain type is required.")
+            compiled_prompt = _build_root_domain_suggestion_prompt_parts(
+                request.targetDomainType,
+                instruction,
+                request.draftText,
+                domain_types,
+                list_domains(settings),
+            )
+            compiled_prompt = f"{compiled_prompt[0]}\n\n{compiled_prompt[1]}"
+            root_mode = True
         answer_payload = _generate_with_ollama(
             settings,
             compiled_prompt,
@@ -3328,12 +4234,21 @@ def create_app() -> FastAPI:
             resolved_domain_type = _resolve_domain_type(domain_types, requested_type)
             domain_type_code = str(resolved_domain_type.get("CODE") or "").strip().upper()
             domain_code = _slugify_code(str(parsed.get("domainCode") or display_name))
-            sql_preview = _build_child_domain_insert_preview(
-                str(request.parentDomainCode).strip(),
-                domain_type_code,
-                domain_code,
-                display_name,
-                description or None,
+            sql_preview = (
+                _build_root_domain_insert_preview(
+                    domain_type_code,
+                    domain_code,
+                    display_name,
+                    description or None,
+                )
+                if root_mode
+                else _build_child_domain_insert_preview(
+                    str(request.parentDomainCode).strip(),
+                    domain_type_code,
+                    domain_code,
+                    display_name,
+                    description or None,
+                )
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Child suggestion parsing failed: {exc}") from exc
@@ -3358,14 +4273,25 @@ def create_app() -> FastAPI:
         if not instruction:
             raise HTTPException(status_code=400, detail="Instruction is required.")
 
-        domain_context = get_domain_assist_context(settings, request.parentDomainCode)
         domain_types = list_domain_types(settings)
-        system_prompt, user_prompt = _build_child_domain_suggestion_prompt_parts(
-            domain_context,
-            instruction,
-            request.draftText,
-            domain_types,
-        )
+        if request.parentDomainCode:
+            domain_context = get_domain_assist_context(settings, request.parentDomainCode)
+            system_prompt, user_prompt = _build_child_domain_suggestion_prompt_parts(
+                domain_context,
+                instruction,
+                request.draftText,
+                domain_types,
+            )
+        else:
+            if not request.targetDomainType:
+                raise HTTPException(status_code=400, detail="A parent domain code or target domain type is required.")
+            system_prompt, user_prompt = _build_root_domain_suggestion_prompt_parts(
+                request.targetDomainType,
+                instruction,
+                request.draftText,
+                domain_types,
+                list_domains(settings),
+            )
         return PromptPreviewResponse(
             model=request.model or settings.ollama_chat_model,
             systemPrompt=system_prompt,
@@ -3374,32 +4300,51 @@ def create_app() -> FastAPI:
 
     @app.post("/domains/suggest-child/execute")
     def execute_suggested_child_domain(request: ExecuteDomainChildSuggestionRequest) -> dict[str, object]:
-        domain_context = get_domain_assist_context(settings, request.parentDomainCode)
-        parent_domain = domain_context.get("domain") or {}
-        if not parent_domain:
-            raise HTTPException(status_code=404, detail="Parent domain not found.")
-
         domain_types = list_domain_types(settings)
         try:
             resolved_domain_type = _resolve_domain_type(domain_types, request.domainType)
             domain_type_code = str(resolved_domain_type.get("CODE") or "").strip().upper()
             domain_code = _slugify_code(request.domainCode or request.displayName)
-            sql_preview = _build_child_domain_insert_preview(
-                request.parentDomainCode.strip(),
-                domain_type_code,
-                domain_code,
-                request.displayName,
-                request.description,
-            )
-            created_domain = create_domain(
-                settings,
-                domain_code=domain_code,
-                domain_type_id=int(resolved_domain_type.get("ID")),
-                domain_orientation_id=parent_domain.get("DomainOrientationId"),
-                display_name=request.displayName,
-                description=request.description,
-                domain_parent_id=parent_domain.get("DomainId"),
-            )
+            if request.parentDomainCode:
+                domain_context = get_domain_assist_context(settings, request.parentDomainCode)
+                parent_domain = domain_context.get("domain") or {}
+                if not parent_domain:
+                    raise HTTPException(status_code=404, detail="Parent domain not found.")
+
+                sql_preview = _build_child_domain_insert_preview(
+                    request.parentDomainCode.strip(),
+                    domain_type_code,
+                    domain_code,
+                    request.displayName,
+                    request.description,
+                )
+                created_domain = create_domain(
+                    settings,
+                    domain_code=domain_code,
+                    domain_type_id=int(resolved_domain_type.get("ID")),
+                    domain_orientation_id=parent_domain.get("DomainOrientationId"),
+                    display_name=request.displayName,
+                    description=request.description,
+                    domain_parent_id=parent_domain.get("DomainId"),
+                )
+            else:
+                if not request.targetDomainType:
+                    raise HTTPException(status_code=400, detail="A parent domain code or target domain type is required.")
+                sql_preview = _build_root_domain_insert_preview(
+                    domain_type_code,
+                    domain_code,
+                    request.displayName,
+                    request.description,
+                )
+                created_domain = create_domain(
+                    settings,
+                    domain_code=domain_code,
+                    domain_type_id=int(resolved_domain_type.get("ID")),
+                    domain_orientation_id=None,
+                    display_name=request.displayName,
+                    description=request.description,
+                    domain_parent_id=None,
+                )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -3618,11 +4563,39 @@ def create_app() -> FastAPI:
     @app.post("/ask/context-preview")
     def ask_context_preview(request: AskRequest) -> ContextPreviewResponse:
         context_units, retrieval_info = _retrieve_context_for_chat(settings, request)
-        context_text = chr(10).join(_build_context_lines(context_units)) if context_units else ""
+        context_lines = _build_context_lines(context_units)
+        policy_context_lines: list[str] = []
+        domain_context_lines: list[str] = []
+        controls_context_lines: list[str] = []
+        selected_domain_code = str(request.selectedDomainCode or "").strip()
+        if selected_domain_code and request.includePolicies:
+            try:
+                policy_data = get_latest_policy_for_root_domain(settings, selected_domain_code)
+                if policy_data:
+                    policy_context_lines = _build_policy_context_lines(policy_data)
+            except Exception:
+                policy_context_lines = []
+        if selected_domain_code and request.includeDomainContext:
+            try:
+                domain_context = get_domain_assist_context(settings, selected_domain_code)
+                if domain_context:
+                    domain_context_lines = _build_domain_context_lines(domain_context)
+            except Exception:
+                domain_context_lines = []
+        if selected_domain_code and request.includeControls:
+            try:
+                control_rows = list_controls_for_branch(settings, selected_domain_code)
+                if control_rows:
+                    controls_context_lines = _build_controls_context_lines(control_rows)
+            except Exception:
+                controls_context_lines = []
+
+        all_context_lines = [*context_lines, *policy_context_lines, *domain_context_lines, *controls_context_lines]
+        context_text = chr(10).join(all_context_lines) if all_context_lines else ""
         context_token_count = sum(
             int(row.get("TokenCount") or 0) if int(row.get("TokenCount") or 0) > 0 else _estimate_token_count(str(row.get("BodyText") or ""))
             for row in context_units
-        )
+        ) + _estimate_token_count(chr(10).join([*policy_context_lines, *domain_context_lines, *controls_context_lines]))
         sources = _build_source_items(context_units)
         return ContextPreviewResponse(
             retrievalMode=str(retrieval_info.get("retrievalMode") or "FullContext"),
@@ -3647,6 +4620,32 @@ def create_app() -> FastAPI:
         context_units, retrieval_info = _retrieve_context_for_chat(settings, request)
         collection_codes = list(retrieval_info.get("collectionCodes") or [])
         context_lines = _build_context_lines(context_units)
+        policy_context_lines: list[str] = []
+        domain_context_lines: list[str] = []
+        controls_context_lines: list[str] = []
+        selected_domain_code = str(request.selectedDomainCode or "").strip()
+        if selected_domain_code and request.includePolicies:
+            try:
+                policy_data = get_latest_policy_for_root_domain(settings, selected_domain_code)
+                if policy_data:
+                    policy_context_lines = _build_policy_context_lines(policy_data)
+            except Exception:
+                policy_context_lines = []
+        if selected_domain_code and request.includeDomainContext:
+            try:
+                domain_context = get_domain_assist_context(settings, selected_domain_code)
+                if domain_context:
+                    domain_context_lines = _build_domain_context_lines(domain_context)
+            except Exception:
+                domain_context_lines = []
+        if selected_domain_code and request.includeControls:
+            try:
+                control_rows = list_controls_for_branch(settings, selected_domain_code)
+                if control_rows:
+                    controls_context_lines = _build_controls_context_lines(control_rows)
+            except Exception:
+                controls_context_lines = []
+        combined_context_lines = [*context_lines, *policy_context_lines, *domain_context_lines, *controls_context_lines]
         sources = _build_source_items(context_units)
 
         history_lines = []
@@ -3656,7 +4655,7 @@ def create_app() -> FastAPI:
             if role and content:
                 history_lines.append(f"{role.title()}: {content}")
 
-        context_text = chr(10).join(context_lines) if context_lines else "No stored context was found."
+        context_text = chr(10).join(combined_context_lines) if combined_context_lines else "No stored context was found."
         history_text = chr(10).join(history_lines) if history_lines else "No previous conversation."
 
         compiled_prompt = (
@@ -3677,6 +4676,7 @@ def create_app() -> FastAPI:
                 history_text=history_text,
                 compiled_prompt=compiled_prompt,
                 retrieval_profile=retrieval_info.get("retrievalProfile") if isinstance(retrieval_info.get("retrievalProfile"), dict) else None,
+                policy_context_lines=[*policy_context_lines, *domain_context_lines, *controls_context_lines],
                 fallback_reason=str(retrieval_info.get("fallbackReason") or "") or None,
             ),
         }
@@ -3709,6 +4709,32 @@ def create_app() -> FastAPI:
         context_units, retrieval_info = _retrieve_context_for_chat(settings, request)
         collection_codes = list(retrieval_info.get("collectionCodes") or [])
         context_lines = _build_context_lines(context_units)
+        policy_context_lines: list[str] = []
+        domain_context_lines: list[str] = []
+        controls_context_lines: list[str] = []
+        selected_domain_code = str(request.selectedDomainCode or "").strip()
+        if selected_domain_code and request.includePolicies:
+            try:
+                policy_data = get_latest_policy_for_root_domain(settings, selected_domain_code)
+                if policy_data:
+                    policy_context_lines = _build_policy_context_lines(policy_data)
+            except Exception:
+                policy_context_lines = []
+        if selected_domain_code and request.includeDomainContext:
+            try:
+                domain_context = get_domain_assist_context(settings, selected_domain_code)
+                if domain_context:
+                    domain_context_lines = _build_domain_context_lines(domain_context)
+            except Exception:
+                domain_context_lines = []
+        if selected_domain_code and request.includeControls:
+            try:
+                control_rows = list_controls_for_branch(settings, selected_domain_code)
+                if control_rows:
+                    controls_context_lines = _build_controls_context_lines(control_rows)
+            except Exception:
+                controls_context_lines = []
+        combined_context_lines = [*context_lines, *policy_context_lines, *domain_context_lines, *controls_context_lines]
         sources = _build_source_items(context_units)
 
         history_lines = []
@@ -3718,7 +4744,7 @@ def create_app() -> FastAPI:
             if role and content:
                 history_lines.append(f"{role.title()}: {content}")
 
-        context_text = chr(10).join(context_lines) if context_lines else "No stored context was found."
+        context_text = chr(10).join(combined_context_lines) if combined_context_lines else "No stored context was found."
         history_text = chr(10).join(history_lines) if history_lines else "No previous conversation."
 
         compiled_prompt = (
@@ -3739,6 +4765,7 @@ def create_app() -> FastAPI:
                 history_text=history_text,
                 compiled_prompt=compiled_prompt,
                 retrieval_profile=retrieval_info.get("retrievalProfile") if isinstance(retrieval_info.get("retrievalProfile"), dict) else None,
+                policy_context_lines=[*policy_context_lines, *domain_context_lines, *controls_context_lines],
                 fallback_reason=str(retrieval_info.get("fallbackReason") or "") or None,
             ),
         }

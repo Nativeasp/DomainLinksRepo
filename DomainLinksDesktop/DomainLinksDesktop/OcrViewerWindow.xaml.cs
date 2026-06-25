@@ -31,6 +31,7 @@ public partial class OcrViewerWindow : Window
         {
             Top = settings.OcrViewerWindowTop;
         }
+        UiScaleHelper.ApplyWindowScale(this, UiScaleHelper.Clamp(settings.AppUiScale));
         if (settings.OcrViewerPreviewPaneWidth > 0)
         {
             PreviewColumn.Width = new GridLength(settings.OcrViewerPreviewPaneWidth);
@@ -44,6 +45,7 @@ public partial class OcrViewerWindow : Window
     private async void OcrViewerWindow_OnLoaded(object sender, RoutedEventArgs e)
     {
         await PreviewWebView.EnsureCoreWebView2Async();
+        UiScaleHelper.ApplyWebViewScale(PreviewWebView, UiScaleHelper.Clamp(DomainLinksDesktopSettings.Load().AppUiScale));
         PreviewWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
             PreviewHostName,
             AppContext.BaseDirectory,

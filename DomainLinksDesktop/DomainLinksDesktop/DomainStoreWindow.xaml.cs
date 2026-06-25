@@ -26,6 +26,7 @@ public partial class DomainStoreWindow : Window
     private readonly ObservableCollection<DomainOrientationItem> _domainOrientations = [];
     private DomainItem? _treeRootNode;
     private DomainItem? _selectedDomain;
+    private DomainItem? _selectedDomainTypeGroup;
     private string? _isolatedDomainCode;
     private string _lastAssistResponse = string.Empty;
     private SuggestedChildDomain? _lastSuggestedChildDomain;
@@ -36,6 +37,7 @@ public partial class DomainStoreWindow : Window
     private GridLength _savedCollectionsWidth = new(420);
     private bool _isDomainTreeVisible = true;
     private bool _isCollectionsPanelVisible = true;
+    private int _reloadGeneration;
 
     internal DomainStoreWindow(DomainLinksDesktopSettings settings)
     {
@@ -51,6 +53,7 @@ public partial class DomainStoreWindow : Window
         {
             Top = settings.DomainStoreWindowTop;
         }
+        UiScaleHelper.ApplyWindowScale(this, UiScaleHelper.Clamp(settings.AppUiScale));
         _httpClient = new HttpClient
         {
             BaseAddress = new Uri(settings.BackendBaseUrl)
@@ -69,11 +72,16 @@ public partial class DomainStoreWindow : Window
     {
         DomainTreeColumn.Width = new GridLength(_settings.DomainStoreLeftPaneWidth);
         SummaryColumn.Width = new GridLength(1, GridUnitType.Star);
-        CollectionsColumn.Width = new GridLength(_settings.DomainStoreRightPaneWidth);
+        CollectionsColumn.MinWidth = 0;
+        CollectionsColumn.Width = new GridLength(0);
+        CollectionsSplitterColumn.Width = new GridLength(0);
         CollectionsPaneRow.Height = new GridLength(_settings.DomainStoreCollectionsPaneHeight);
+        AiWritingAssistExpander.IsExpanded = _settings.DomainStoreAiWritingAssistExpanded;
         _savedDomainTreeWidth = DomainTreeColumn.Width;
-        _savedCollectionsWidth = CollectionsColumn.Width;
+        _savedCollectionsWidth = new GridLength(_settings.DomainStoreRightPaneWidth);
+        _isCollectionsPanelVisible = false;
         UpdateOuterPanelToggleState();
+        CollapseCollectionsDock();
         await ReloadAsync();
     }
 
@@ -92,9 +100,14 @@ public partial class DomainStoreWindow : Window
             DomainStoreLeftPaneWidth = _isDomainTreeVisible ? DomainTreeColumn.ActualWidth : _savedDomainTreeWidth.Value,
             DomainStoreCenterPaneWidth = SummaryColumn.ActualWidth,
             DomainStoreRightPaneWidth = _isCollectionsPanelVisible ? CollectionsColumn.ActualWidth : _savedCollectionsWidth.Value,
-            DomainStoreCollectionsPaneHeight = _settings.DomainStoreCollectionsPaneHeight,
+            DomainStoreCollectionsPaneHeight = CollectionsPaneRow.ActualHeight > CollectionsPaneRow.MinHeight
+                ? CollectionsPaneRow.ActualHeight
+                : _settings.DomainStoreCollectionsPaneHeight,
+            DomainStoreAiWritingAssistExpanded = AiWritingAssistExpander.IsExpanded,
             DomainControlsBranchPaneHeight = ControlsTabContent.BranchPaneHeight,
             DomainControlsSuggestionPaneWidth = ControlsTabContent.SuggestionsPaneWidth,
+            PolicyWorkspacePoliciesPaneWidth = PolicyWorkspaceTabContent.PoliciesPaneWidth,
+            PolicyWorkspaceControlSelectionPaneHeight = PolicyWorkspaceTabContent.ControlSelectionPaneHeight,
             LastSelectedModel = _settings.LastSelectedModel,
             LastSelectedRetrievalMode = _settings.LastSelectedRetrievalMode,
         };
@@ -103,6 +116,7 @@ public partial class DomainStoreWindow : Window
 
     private async Task ReloadAsync(string? domainCodeToSelect = null, string? collectionCodeToSelect = null)
     {
+        var reloadGeneration = Interlocked.Increment(ref _reloadGeneration);
         try
         {
             StatusTextBlock.Text = "Loading domains...";
@@ -110,17 +124,17 @@ public partial class DomainStoreWindow : Window
             var collectionsTask = _httpClient.GetFromJsonAsync<List<CollectionItem>>("/collections");
             var domainTypesTask = _httpClient.GetFromJsonAsync<List<DomainTypeItem>>("/domain-types");
             var domainOrientationsTask = _httpClient.GetFromJsonAsync<List<DomainOrientationItem>>("/domain-orientations");
-            var policiesTask = _httpClient.GetFromJsonAsync<List<PolicyListItem>>("/policies");
-            var controlsTask = _httpClient.GetFromJsonAsync<List<ControlListItem>>("/controls/report-rows");
+            await Task.WhenAll(domainsTask, collectionsTask, domainTypesTask, domainOrientationsTask);
 
-            await Task.WhenAll(domainsTask, collectionsTask, domainTypesTask, domainOrientationsTask, policiesTask, controlsTask);
+            if (reloadGeneration != _reloadGeneration)
+            {
+                return;
+            }
 
             var domains = domainsTask.Result ?? [];
             var collections = collectionsTask.Result ?? [];
             var domainTypes = domainTypesTask.Result ?? [];
             var domainOrientations = domainOrientationsTask.Result ?? [];
-            var policies = policiesTask.Result ?? [];
-            var controls = controlsTask.Result ?? [];
 
             _domainTypes.Clear();
             foreach (var domainType in domainTypes
@@ -137,7 +151,7 @@ public partial class DomainStoreWindow : Window
                 _domainOrientations.Add(domainOrientation);
             }
 
-            BuildDomainTree(domains, collections, policies, controls);
+            BuildDomainTree(domains, collections, [], []);
 
             var selectedDomain = FindDomainByCode(domainCodeToSelect)
                 ?? _selectedDomain?.SourceDomain
@@ -162,12 +176,40 @@ public partial class DomainStoreWindow : Window
                 }
             }
 
-            StatusTextBlock.Text = "Domain store loaded.";
+            StatusTextBlock.Text = "Domain tree loaded. Loading counts...";
+            _ = LoadDeferredTreeDataAsync(reloadGeneration);
         }
         catch (Exception ex)
         {
             StatusTextBlock.Text = $"Load failed: {ex.Message}";
             MessageBox.Show(this, ex.Message, "Domain Store", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async Task LoadDeferredTreeDataAsync(int reloadGeneration)
+    {
+        try
+        {
+            var policiesTask = _httpClient.GetFromJsonAsync<List<PolicyListItem>>("/policies");
+            var controlsTask = _httpClient.GetFromJsonAsync<List<ControlListItem>>("/controls/report-rows");
+            await Task.WhenAll(policiesTask, controlsTask);
+
+            if (reloadGeneration != _reloadGeneration)
+            {
+                return;
+            }
+
+            ApplyBranchCountsToLoadedTree(policiesTask.Result ?? [], controlsTask.Result ?? []);
+            StatusTextBlock.Text = "Domain store loaded.";
+        }
+        catch (Exception ex)
+        {
+            if (reloadGeneration != _reloadGeneration)
+            {
+                return;
+            }
+
+            StatusTextBlock.Text = $"Domain tree loaded. Count refresh failed: {ex.Message}";
         }
     }
 
@@ -247,6 +289,32 @@ public partial class DomainStoreWindow : Window
         ApplyDomainSearchFilter();
     }
 
+    private void ApplyBranchCountsToLoadedTree(
+        List<PolicyListItem> policies,
+        List<ControlListItem> controls)
+    {
+        var policyCountsByRootDomain = policies
+            .Where(item => !string.IsNullOrWhiteSpace(item.RootDomainCode))
+            .GroupBy(item => item.RootDomainCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        var controlCountsByDomain = controls
+            .Where(item => !string.IsNullOrWhiteSpace(item.DomainCode))
+            .GroupBy(item => item.DomainCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rootDomain in _allRootDomains)
+        {
+            ApplyBranchCounts(rootDomain, policyCountsByRootDomain, controlCountsByDomain);
+        }
+
+        ApplyDomainSearchFilter();
+        if (_selectedDomain is not null)
+        {
+            DomainStatsTextBlock.Text =
+                $"{_selectedDomain.ChildDomains.Count} child domains, {_selectedDomain.Collections.Count} collections";
+        }
+    }
+
     private DomainItem? GetFirstRealDomain()
     {
         return _allRootDomains
@@ -295,6 +363,7 @@ public partial class DomainStoreWindow : Window
             return;
         }
 
+        _selectedDomainTypeGroup = null;
         _selectedDomain = domain;
         ExpandAncestors(domain);
         SharedDomainTreeView.UpdateLayout();
@@ -364,9 +433,13 @@ public partial class DomainStoreWindow : Window
         }
     }
 
-    private void ClearEditor()
+    private void ClearEditor(bool preserveTypeGroupSelection = false)
     {
         _selectedDomain = null;
+        if (!preserveTypeGroupSelection)
+        {
+            _selectedDomainTypeGroup = null;
+        }
         DomainNameTextBox.Text = string.Empty;
         DomainDescriptionTextBox.Text = string.Empty;
         DomainStatsTextBlock.Text = "Select a domain";
@@ -384,8 +457,9 @@ public partial class DomainStoreWindow : Window
     private void UpdateAssistActionAvailability()
     {
         var hasSelectedDomain = _selectedDomain is not null;
+        var hasSelectedTypeGroup = _selectedDomainTypeGroup is not null;
         GenerateAssistButton.IsEnabled = hasSelectedDomain;
-        SuggestChildNodeButton.IsEnabled = hasSelectedDomain;
+        SuggestChildNodeButton.IsEnabled = hasSelectedDomain || hasSelectedTypeGroup;
     }
 
     private void DomainSearchTextBox_OnTextChanged(object sender, TextChangedEventArgs e)
@@ -585,6 +659,11 @@ public partial class DomainStoreWindow : Window
     private void UpdateDomainTreeSummary(IEnumerable<DomainItem> visibleNodes)
     {
         var topLevelNodes = visibleNodes.ToList();
+        var summaryRoots = topLevelNodes
+            .SelectMany(GetSummaryRootDomains)
+            .GroupBy(item => item.DomainCode, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
         var realDomains = topLevelNodes
             .SelectMany(EnumerateDomains)
             .Where(item => !item.IsGroup)
@@ -593,7 +672,31 @@ public partial class DomainStoreWindow : Window
             .ToList();
 
         DomainTreeSummaryTextBlock.Text =
-            $"Domains {realDomains.Count} | Collections {topLevelNodes.Sum(item => item.BranchCollectionCount)} | Policies {topLevelNodes.Sum(item => item.BranchPolicyCount)} | Controls {topLevelNodes.Sum(item => item.BranchControlCount)}";
+            $"Domains {realDomains.Count} | Collections {summaryRoots.Sum(item => item.BranchCollectionCount)} | Policies {summaryRoots.Sum(item => item.BranchPolicyCount)} | Controls {summaryRoots.Sum(item => item.BranchControlCount)}";
+    }
+
+    private static IEnumerable<DomainItem> GetSummaryRootDomains(DomainItem node)
+    {
+        if (!node.IsGroup)
+        {
+            yield return node.SourceDomain ?? node;
+            yield break;
+        }
+
+        foreach (var child in node.ChildDomains)
+        {
+            if (child.IsGroup)
+            {
+                foreach (var nested in GetSummaryRootDomains(child))
+                {
+                    yield return nested;
+                }
+
+                continue;
+            }
+
+            yield return child.SourceDomain ?? child;
+        }
     }
 
     private static bool DomainFieldMatches(DomainItem domain, string searchText)
@@ -1479,9 +1582,10 @@ public partial class DomainStoreWindow : Window
     private async void SuggestChildNodeButton_OnClick(object sender, RoutedEventArgs e)
     {
         var targetDomain = ResolveSelectedDomainForAction(showPrompt: false);
-        if (targetDomain is null)
+        var targetTypeGroup = _selectedDomainTypeGroup;
+        if (targetDomain is null && targetTypeGroup is null)
         {
-            MessageBox.Show(this, "Select a domain first.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Select a domain or a domain type root first.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -1500,14 +1604,17 @@ public partial class DomainStoreWindow : Window
             CopyChildSqlButton.IsEnabled = false;
             _lastSuggestedChildDomain = null;
             ChildSqlPreviewTextBox.Text = string.Empty;
-            StatusTextBlock.Text = $"Suggesting a child domain for {targetDomain.DisplayName}...";
+            StatusTextBlock.Text = targetDomain is not null
+                ? $"Suggesting a child domain for {targetDomain.DisplayName}..."
+                : $"Suggesting a new top-level {targetTypeGroup!.DisplayName} domain...";
             AssistResponseTextBox.Text = "Generating child suggestion...";
 
             await ShowPromptPreviewAsync(
                 "/domains/suggest-child-preview",
                 new
                 {
-                    parentDomainCode = targetDomain.DomainCode,
+                    parentDomainCode = targetDomain?.DomainCode,
+                    targetDomainType = targetTypeGroup?.DomainType,
                     instruction,
                     draftText = DomainDescriptionTextBox.Text,
                     model = DomainAssistModelName,
@@ -1518,7 +1625,8 @@ public partial class DomainStoreWindow : Window
                 "/domains/suggest-child",
                 new
                 {
-                    parentDomainCode = targetDomain.DomainCode,
+                    parentDomainCode = targetDomain?.DomainCode,
+                    targetDomainType = targetTypeGroup?.DomainType,
                     instruction,
                     draftText = DomainDescriptionTextBox.Text,
                     model = DomainAssistModelName,
@@ -1650,9 +1758,10 @@ public partial class DomainStoreWindow : Window
     private async void RunChildInsertButton_OnClick(object sender, RoutedEventArgs e)
     {
         var targetDomain = ResolveSelectedDomainForAction(showPrompt: false);
-        if (targetDomain is null)
+        var targetTypeGroup = _selectedDomainTypeGroup;
+        if (targetDomain is null && targetTypeGroup is null)
         {
-            MessageBox.Show(this, "Select a domain first.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this, "Select a domain or domain type root first.", "Domain Store", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -1673,7 +1782,8 @@ public partial class DomainStoreWindow : Window
                 "/domains/suggest-child/execute",
                 new
                 {
-                    parentDomainCode = targetDomain.DomainCode,
+                    parentDomainCode = targetDomain?.DomainCode,
+                    targetDomainType = targetTypeGroup?.DomainType,
                     displayName = suggestedChild.DisplayName,
                     description = suggestedChild.Description,
                     domainType = suggestedChild.DomainType,
@@ -1717,7 +1827,8 @@ public partial class DomainStoreWindow : Window
         }
         else
         {
-            ClearEditor();
+            SelectDomainTypeGroup(targetDomain);
+            ClearEditor(preserveTypeGroupSelection: true);
             StatusTextBlock.Text = $"Selected group: {targetDomain.DisplayName}";
         }
 
@@ -1811,10 +1922,18 @@ public partial class DomainStoreWindow : Window
             }
             else
             {
-                ClearEditor();
+                SelectDomainTypeGroup(domain.SourceDomain ?? domain);
+                ClearEditor(preserveTypeGroupSelection: true);
                 StatusTextBlock.Text = $"Selected group: {domain.DisplayName}";
             }
         }
+    }
+
+    private void SelectDomainTypeGroup(DomainItem domainGroup)
+    {
+        _selectedDomain = null;
+        _selectedDomainTypeGroup = IsTypeNode(domainGroup) ? domainGroup : null;
+        UpdateAssistActionAvailability();
     }
 
     private void DomainTreeViewItem_OnPreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -2252,6 +2371,16 @@ public partial class DomainStoreWindow : Window
         await ReloadAsync(_selectedDomain?.DomainCode, (CollectionsListBox.SelectedItem as CollectionItem)?.CollectionCode);
     }
 
+    private void CollapseCollectionsDock()
+    {
+        _isCollectionsPanelVisible = false;
+        CollectionsColumn.MinWidth = 0;
+        CollectionsColumn.Width = new GridLength(0);
+        CollectionsSplitterColumn.Width = new GridLength(0);
+        CollectionsSplitter.Visibility = Visibility.Collapsed;
+        ToggleCollectionsPanelButton.Visibility = Visibility.Collapsed;
+    }
+
     private void ToggleDomainTreeButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_isDomainTreeVisible)
@@ -2277,33 +2406,18 @@ public partial class DomainStoreWindow : Window
         }
 
         UpdateOuterPanelToggleState();
+        CollapseCollectionsDock();
     }
 
     private void ToggleCollectionsPanelButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_isCollectionsPanelVisible)
+        if (DomainStoreCenterTabControl.SelectedItem != CollectionsTabItem)
         {
-            CaptureCurrentPaneWidths();
-
-            if (CollectionsColumn.Width.Value > 0)
-            {
-                _savedCollectionsWidth = CollectionsColumn.Width;
-            }
-
-            CollectionsColumn.MinWidth = 0;
-            CollectionsColumn.Width = new GridLength(0);
-            _isCollectionsPanelVisible = false;
-        }
-        else
-        {
-            CollectionsColumn.MinWidth = 320;
-            CollectionsColumn.Width = _savedCollectionsWidth.Value > 0
-                ? _savedCollectionsWidth
-                : new GridLength(1, GridUnitType.Star);
-            _isCollectionsPanelVisible = true;
+            DomainStoreCenterTabControl.SelectedItem = CollectionsTabItem;
         }
 
         UpdateOuterPanelToggleState();
+        CollapseCollectionsDock();
     }
 
     private async void DomainStoreCenterTabControl_OnSelectionChanged(object sender, SelectionChangedEventArgs e)

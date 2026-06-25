@@ -30,6 +30,7 @@ internal sealed record DomainLinksDesktopSettings
     public double LeftPaneWidth { get; init; } = 280;
     public double RightPaneWidth { get; init; } = 320;
     public double PromptPaneHeight { get; init; } = 160;
+    public double AppUiScale { get; init; } = 1.0;
     public double DomainStoreWindowWidth { get; init; } = 1500;
     public double DomainStoreWindowHeight { get; init; } = 860;
     public double DomainStoreWindowLeft { get; init; } = double.NaN;
@@ -38,8 +39,11 @@ internal sealed record DomainLinksDesktopSettings
     public double DomainStoreCenterPaneWidth { get; init; } = 500;
     public double DomainStoreRightPaneWidth { get; init; } = 420;
     public double DomainStoreCollectionsPaneHeight { get; init; } = 260;
+    public bool DomainStoreAiWritingAssistExpanded { get; init; } = true;
     public double DomainControlsBranchPaneHeight { get; init; } = 240;
     public double DomainControlsSuggestionPaneWidth { get; init; } = 460;
+    public double PolicyWorkspacePoliciesPaneWidth { get; init; } = 430;
+    public double PolicyWorkspaceControlSelectionPaneHeight { get; init; } = 220;
     public double OcrViewerWindowWidth { get; init; } = 1340;
     public double OcrViewerWindowHeight { get; init; } = 860;
     public double OcrViewerWindowLeft { get; init; } = double.NaN;
@@ -94,6 +98,7 @@ internal sealed record DomainLinksDesktopSettings
                 LeftPaneWidth = settings.LeftPaneWidth > 0 ? settings.LeftPaneWidth : 280,
                 RightPaneWidth = settings.RightPaneWidth > 0 ? settings.RightPaneWidth : 320,
                 PromptPaneHeight = settings.PromptPaneHeight > 0 ? settings.PromptPaneHeight : 160,
+                AppUiScale = settings.AppUiScale > 0 ? UiScaleHelper.Clamp(settings.AppUiScale) : UiScaleHelper.DefaultScale,
                 DomainStoreWindowWidth = settings.DomainStoreWindowWidth > 0 ? settings.DomainStoreWindowWidth : 1500,
                 DomainStoreWindowHeight = settings.DomainStoreWindowHeight > 0 ? settings.DomainStoreWindowHeight : 860,
                 DomainStoreWindowLeft = settings.DomainStoreWindowLeft,
@@ -102,8 +107,11 @@ internal sealed record DomainLinksDesktopSettings
                 DomainStoreCenterPaneWidth = settings.DomainStoreCenterPaneWidth > 0 ? settings.DomainStoreCenterPaneWidth : 500,
                 DomainStoreRightPaneWidth = settings.DomainStoreRightPaneWidth > 0 ? settings.DomainStoreRightPaneWidth : 420,
                 DomainStoreCollectionsPaneHeight = settings.DomainStoreCollectionsPaneHeight > 0 ? settings.DomainStoreCollectionsPaneHeight : 260,
+                DomainStoreAiWritingAssistExpanded = settings.DomainStoreAiWritingAssistExpanded,
                 DomainControlsBranchPaneHeight = settings.DomainControlsBranchPaneHeight > 0 ? settings.DomainControlsBranchPaneHeight : 240,
                 DomainControlsSuggestionPaneWidth = settings.DomainControlsSuggestionPaneWidth > 0 ? settings.DomainControlsSuggestionPaneWidth : 460,
+                PolicyWorkspacePoliciesPaneWidth = settings.PolicyWorkspacePoliciesPaneWidth > 0 ? settings.PolicyWorkspacePoliciesPaneWidth : 430,
+                PolicyWorkspaceControlSelectionPaneHeight = settings.PolicyWorkspaceControlSelectionPaneHeight > 0 ? settings.PolicyWorkspaceControlSelectionPaneHeight : 220,
                 OcrViewerWindowWidth = settings.OcrViewerWindowWidth > 0 ? settings.OcrViewerWindowWidth : 1340,
                 OcrViewerWindowHeight = settings.OcrViewerWindowHeight > 0 ? settings.OcrViewerWindowHeight : 860,
                 OcrViewerWindowLeft = settings.OcrViewerWindowLeft,
@@ -149,6 +157,7 @@ internal sealed record DomainLinksDesktopSettings
             LeftPaneWidth = PositiveOrDefault(LeftPaneWidth, 280),
             RightPaneWidth = PositiveOrDefault(RightPaneWidth, 320),
             PromptPaneHeight = PositiveOrDefault(PromptPaneHeight, 160),
+            AppUiScale = UiScaleHelper.Clamp(AppUiScale),
             DomainStoreWindowWidth = PositiveOrDefault(DomainStoreWindowWidth, 1500),
             DomainStoreWindowHeight = PositiveOrDefault(DomainStoreWindowHeight, 860),
             DomainStoreWindowLeft = FiniteOrDefault(DomainStoreWindowLeft, 0),
@@ -159,6 +168,8 @@ internal sealed record DomainLinksDesktopSettings
             DomainStoreCollectionsPaneHeight = PositiveOrDefault(DomainStoreCollectionsPaneHeight, 260),
             DomainControlsBranchPaneHeight = PositiveOrDefault(DomainControlsBranchPaneHeight, 240),
             DomainControlsSuggestionPaneWidth = PositiveOrDefault(DomainControlsSuggestionPaneWidth, 460),
+            PolicyWorkspacePoliciesPaneWidth = PositiveOrDefault(PolicyWorkspacePoliciesPaneWidth, 430),
+            PolicyWorkspaceControlSelectionPaneHeight = PositiveOrDefault(PolicyWorkspaceControlSelectionPaneHeight, 220),
             OcrViewerWindowWidth = PositiveOrDefault(OcrViewerWindowWidth, 1340),
             OcrViewerWindowHeight = PositiveOrDefault(OcrViewerWindowHeight, 860),
             OcrViewerWindowLeft = FiniteOrDefault(OcrViewerWindowLeft, 0),

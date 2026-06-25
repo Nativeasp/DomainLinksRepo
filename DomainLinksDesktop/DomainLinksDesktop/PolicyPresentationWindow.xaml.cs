@@ -21,6 +21,7 @@ public partial class PolicyPresentationWindow : Window
         {
             Top = settings.PolicyPresentationWindowTop;
         }
+        UiScaleHelper.ApplyWindowScale(this, UiScaleHelper.Clamp(settings.AppUiScale));
         _presentationUrl = presentationUrl;
         TitleTextBlock.Text = string.IsNullOrWhiteSpace(policyTitle) ? "Policy Presentation" : policyTitle;
         SubtitleTextBlock.Text = string.IsNullOrWhiteSpace(policySubtitle) ? "Saved policy view" : policySubtitle;
@@ -31,6 +32,7 @@ public partial class PolicyPresentationWindow : Window
     private async void PolicyPresentationWindow_OnLoaded(object sender, RoutedEventArgs e)
     {
         await PolicyWebView.EnsureCoreWebView2Async();
+        UiScaleHelper.ApplyWebViewScale(PolicyWebView, UiScaleHelper.Clamp(DomainLinksDesktopSettings.Load().AppUiScale));
         PolicyWebView.Source = new Uri(_presentationUrl);
     }
 
