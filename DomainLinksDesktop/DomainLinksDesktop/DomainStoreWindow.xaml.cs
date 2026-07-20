@@ -38,6 +38,7 @@ public partial class DomainStoreWindow : Window
     private bool _isDomainTreeVisible = true;
     private bool _isCollectionsPanelVisible = true;
     private int _reloadGeneration;
+    private int _documentLoadGeneration;
 
     internal DomainStoreWindow(DomainLinksDesktopSettings settings)
     {
@@ -83,6 +84,48 @@ public partial class DomainStoreWindow : Window
         UpdateOuterPanelToggleState();
         CollapseCollectionsDock();
         await ReloadAsync();
+    }
+
+    private void OpenBrainButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var context = GetCurrentBrainLaunchContext();
+        if (context is null)
+        {
+            MessageBox.Show(this, "Select a domain, collection, document, saved control, or policy first.",
+                "DomainLinks Brain", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var window = new DomainLinksBrainWindow(context) { Owner = this };
+        window.Show();
+        window.Activate();
+    }
+
+    private BrainLaunchContext? GetCurrentBrainLaunchContext()
+    {
+        if (DomainStoreCenterTabControl.SelectedItem == ControlsTabItem)
+        {
+            return ControlsTabContent.GetBrainLaunchContext();
+        }
+        if (DomainStoreCenterTabControl.SelectedItem == PolicyWorkspaceTabItem)
+        {
+            return PolicyWorkspaceTabContent.GetBrainLaunchContext();
+        }
+        if (DocumentsDataGrid.SelectedItem is DocumentListItem document)
+        {
+            return new BrainLaunchContext(BrainScopeKind.Document, document.DocumentId, document.SourceName,
+                FocusNodeId: $"document:{document.DocumentId}");
+        }
+        if (CollectionsListBox.SelectedItem is CollectionItem collection)
+        {
+            return new BrainLaunchContext(BrainScopeKind.Collection, collection.CollectionCode, collection.DisplayName,
+                FocusNodeId: $"collection:{collection.CollectionId}");
+        }
+        var domain = _selectedDomain?.SourceDomain ?? _selectedDomain;
+        return domain is null || string.IsNullOrWhiteSpace(domain.DomainCode)
+            ? null
+            : new BrainLaunchContext(BrainScopeKind.Domain, domain.DomainCode, domain.DisplayName,
+                FocusNodeId: $"domain:{domain.DomainId}");
     }
 
     private void DomainStoreWindow_OnClosing(object? sender, CancelEventArgs e)
@@ -151,7 +194,7 @@ public partial class DomainStoreWindow : Window
                 _domainOrientations.Add(domainOrientation);
             }
 
-            BuildDomainTree(domains, collections, [], []);
+            BuildDomainTree(domains, collections);
 
             var selectedDomain = FindDomainByCode(domainCodeToSelect)
                 ?? _selectedDomain?.SourceDomain
@@ -176,8 +219,7 @@ public partial class DomainStoreWindow : Window
                 }
             }
 
-            StatusTextBlock.Text = "Domain tree loaded. Loading counts...";
-            _ = LoadDeferredTreeDataAsync(reloadGeneration);
+            StatusTextBlock.Text = "Domain store loaded.";
         }
         catch (Exception ex)
         {
@@ -186,44 +228,18 @@ public partial class DomainStoreWindow : Window
         }
     }
 
-    private async Task LoadDeferredTreeDataAsync(int reloadGeneration)
-    {
-        try
-        {
-            var policiesTask = _httpClient.GetFromJsonAsync<List<PolicyListItem>>("/policies");
-            var controlsTask = _httpClient.GetFromJsonAsync<List<ControlListItem>>("/controls/report-rows");
-            await Task.WhenAll(policiesTask, controlsTask);
-
-            if (reloadGeneration != _reloadGeneration)
-            {
-                return;
-            }
-
-            ApplyBranchCountsToLoadedTree(policiesTask.Result ?? [], controlsTask.Result ?? []);
-            StatusTextBlock.Text = "Domain store loaded.";
-        }
-        catch (Exception ex)
-        {
-            if (reloadGeneration != _reloadGeneration)
-            {
-                return;
-            }
-
-            StatusTextBlock.Text = $"Domain tree loaded. Count refresh failed: {ex.Message}";
-        }
-    }
-
     private void BuildDomainTree(
         List<DomainItem> domains,
-        List<CollectionItem> collections,
-        List<PolicyListItem> policies,
-        List<ControlListItem> controls)
+        List<CollectionItem> collections)
     {
         _sharedRootDomains.Clear();
         _clientRootDomains.Clear();
         _allRootDomains.Clear();
         _treeRootNode = null;
         var domainLookup = domains.ToDictionary(domain => domain.DomainId, StringComparer.OrdinalIgnoreCase);
+        var domainByCode = domains
+            .Where(domain => !string.IsNullOrWhiteSpace(domain.DomainCode))
+            .ToDictionary(domain => domain.DomainCode, StringComparer.OrdinalIgnoreCase);
 
         foreach (var domain in domains)
         {
@@ -233,17 +249,13 @@ public partial class DomainStoreWindow : Window
             domain.TreeChildren.Clear();
             domain.IsExpanded = false;
             domain.IsSelected = false;
-            domain.BranchCollectionCount = 0;
-            domain.BranchPolicyCount = 0;
-            domain.BranchControlCount = 0;
         }
 
         foreach (var collection in collections)
         {
             collection.ParentDomain = null;
-            var domain = domains.FirstOrDefault(item =>
-                string.Equals(item.DomainCode, collection.DomainCode, StringComparison.OrdinalIgnoreCase));
-            if (domain is null)
+            if (string.IsNullOrWhiteSpace(collection.DomainCode)
+                || !domainByCode.TryGetValue(collection.DomainCode, out var domain))
             {
                 continue;
             }
@@ -270,41 +282,6 @@ public partial class DomainStoreWindow : Window
                      .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             _allRootDomains.Add(rootDomain);
-        }
-
-        var policyCountsByRootDomain = policies
-            .Where(item => !string.IsNullOrWhiteSpace(item.RootDomainCode))
-            .GroupBy(item => item.RootDomainCode, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-        var controlCountsByDomain = controls
-            .Where(item => !string.IsNullOrWhiteSpace(item.DomainCode))
-            .GroupBy(item => item.DomainCode, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-
-        foreach (var rootDomain in _allRootDomains)
-        {
-            ApplyBranchCounts(rootDomain, policyCountsByRootDomain, controlCountsByDomain);
-        }
-
-        ApplyDomainSearchFilter();
-    }
-
-    private void ApplyBranchCountsToLoadedTree(
-        List<PolicyListItem> policies,
-        List<ControlListItem> controls)
-    {
-        var policyCountsByRootDomain = policies
-            .Where(item => !string.IsNullOrWhiteSpace(item.RootDomainCode))
-            .GroupBy(item => item.RootDomainCode, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-        var controlCountsByDomain = controls
-            .Where(item => !string.IsNullOrWhiteSpace(item.DomainCode))
-            .GroupBy(item => item.DomainCode, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-
-        foreach (var rootDomain in _allRootDomains)
-        {
-            ApplyBranchCounts(rootDomain, policyCountsByRootDomain, controlCountsByDomain);
         }
 
         ApplyDomainSearchFilter();
@@ -401,6 +378,7 @@ public partial class DomainStoreWindow : Window
 
     private async Task LoadDocumentsAsync(DomainItem domain, CollectionItem? selectedCollection = null)
     {
+        var documentLoadGeneration = Interlocked.Increment(ref _documentLoadGeneration);
         try
         {
             DocumentsDataGrid.ItemsSource = null;
@@ -409,14 +387,31 @@ public partial class DomainStoreWindow : Window
                 ? domain.Collections.ToList()
                 : [selectedCollection];
 
-            var documents = new List<DocumentListItem>();
-            foreach (var collection in targetCollections)
+            if (targetCollections.Count == 0)
             {
-                var collectionDocuments =
-                    await _httpClient.GetFromJsonAsync<List<DocumentListItem>>($"/documents?collectionCode={Uri.EscapeDataString(collection.CollectionCode)}")
-                    ?? [];
-                documents.AddRange(collectionDocuments);
+                DocumentScopeTextBlock.Text = selectedCollection is null
+                    ? "0 collections in scope"
+                    : selectedCollection.DisplayName;
+                DocumentsDataGrid.ItemsSource = Array.Empty<DocumentListItem>();
+                StatusTextBlock.Text = "Loaded 0 documents.";
+                return;
             }
+
+            var documentTasks = targetCollections
+                .Select(collection => _httpClient.GetFromJsonAsync<List<DocumentListItem>>(
+                    $"/documents?collectionCode={Uri.EscapeDataString(collection.CollectionCode)}"))
+                .ToArray();
+            await Task.WhenAll(documentTasks);
+
+            if (documentLoadGeneration != _documentLoadGeneration
+                || !string.Equals(_selectedDomain?.DomainCode, domain.DomainCode, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var documents = documentTasks
+                .SelectMany(task => task.Result ?? [])
+                .ToList();
 
             DocumentScopeTextBlock.Text = selectedCollection is null
                 ? $"{targetCollections.Count} collections in scope"
@@ -631,29 +626,6 @@ public partial class DomainStoreWindow : Window
             IsGroup = source.IsGroup,
             SourceDomain = source,
         };
-    }
-
-    private static void ApplyBranchCounts(
-        DomainItem domain,
-        IReadOnlyDictionary<string, int> policyCountsByRootDomain,
-        IReadOnlyDictionary<string, int> controlCountsByDomain)
-    {
-        foreach (var child in domain.ChildDomains)
-        {
-            ApplyBranchCounts(child, policyCountsByRootDomain, controlCountsByDomain);
-        }
-
-        var directCollectionCount = domain.Collections.Count;
-        var directPolicyCount = policyCountsByRootDomain.TryGetValue(domain.DomainCode, out var policyCount)
-            ? policyCount
-            : 0;
-        var directControlCount = controlCountsByDomain.TryGetValue(domain.DomainCode, out var controlCount)
-            ? controlCount
-            : 0;
-
-        domain.BranchCollectionCount = directCollectionCount + domain.ChildDomains.Sum(item => item.BranchCollectionCount);
-        domain.BranchPolicyCount = directPolicyCount + domain.ChildDomains.Sum(item => item.BranchPolicyCount);
-        domain.BranchControlCount = directControlCount + domain.ChildDomains.Sum(item => item.BranchControlCount);
     }
 
     private void UpdateDomainTreeSummary(IEnumerable<DomainItem> visibleNodes)

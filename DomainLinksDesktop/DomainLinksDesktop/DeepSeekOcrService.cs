@@ -9,20 +9,27 @@ namespace DomainLinksDesktop;
 
 internal sealed class DeepSeekOcrService
 {
-    internal const string ModelName = "deepseek-ocr:3b";
     private const string PromptText = "Extract the text in the image.";
     private const int PdfMaxDimension = 1800;
 
     private readonly HttpClient _httpClient;
+    private readonly string _modelName;
 
-    public DeepSeekOcrService(string ollamaBaseUrl)
+    public DeepSeekOcrService(string ollamaBaseUrl, string modelName)
     {
         _httpClient = new HttpClient
         {
             BaseAddress = new Uri(ollamaBaseUrl),
             Timeout = TimeSpan.FromMinutes(4),
         };
+        _modelName = string.IsNullOrWhiteSpace(modelName)
+            ? DomainLinksDesktopSettings.DefaultOcrModel
+            : modelName.Trim();
     }
+
+    public string ModelName => _modelName;
+
+    public string DisplayName => string.IsNullOrWhiteSpace(_modelName) ? "OCR" : _modelName;
 
     public async Task<OcrViewerResult> ExtractTextAsync(string filePath, CancellationToken cancellationToken = default)
     {
@@ -36,8 +43,8 @@ internal sealed class DeepSeekOcrService
             return new OcrViewerResult(
                 false,
                 string.Empty,
-                $"Ollama model '{ModelName}' is not available at {_httpClient.BaseAddress}.",
-                ModelName);
+                $"Ollama model '{_modelName}' is not available at {_httpClient.BaseAddress}.",
+                _modelName);
         }
 
         var extension = Path.GetExtension(filePath);
@@ -50,7 +57,7 @@ internal sealed class DeepSeekOcrService
     {
         var payload = await _httpClient.GetFromJsonAsync<OllamaTagsPayload>("/api/tags", cancellationToken);
         return payload?.Models?.Any(model =>
-                   string.Equals(model.Name, ModelName, StringComparison.OrdinalIgnoreCase))
+                   string.Equals(model.Name, _modelName, StringComparison.OrdinalIgnoreCase))
                == true;
     }
 
@@ -83,7 +90,7 @@ internal sealed class DeepSeekOcrService
             {
                 var errorMessage = pageImages.Count == 1
                     ? pageResult.ErrorMessage
-                    : $"DeepSeek OCR failed on PDF page {index + 1}: {pageResult.ErrorMessage}";
+                    : $"{DisplayName} failed on PDF page {index + 1}: {pageResult.ErrorMessage}";
                 return new OcrViewerResult(false, string.Empty, errorMessage, pageResult.EngineName);
             }
 
@@ -95,15 +102,15 @@ internal sealed class DeepSeekOcrService
 
         if (pageTexts.Count == 0)
         {
-            return new OcrViewerResult(false, string.Empty, "DeepSeek OCR returned no readable text for any PDF page.", ModelName);
+            return new OcrViewerResult(false, string.Empty, $"{DisplayName} returned no readable text for any PDF page.", _modelName);
         }
 
         return new OcrViewerResult(
             true,
             string.Join(Environment.NewLine + Environment.NewLine, pageTexts),
             string.Empty,
-            ModelName,
-            $"OCR complete: {pageTexts.Count} PDF page{(pageTexts.Count == 1 ? string.Empty : "s")} processed with {ModelName}.");
+            _modelName,
+            $"OCR complete: {pageTexts.Count} PDF page{(pageTexts.Count == 1 ? string.Empty : "s")} processed with {_modelName}.");
     }
 
     private static async Task<List<string>> RenderPdfPagesAsync(string filePath, CancellationToken cancellationToken)
@@ -160,7 +167,7 @@ internal sealed class DeepSeekOcrService
     {
         var request = new OllamaGenerateRequest
         {
-            Model = ModelName,
+            Model = _modelName,
             Prompt = PromptText,
             Stream = false,
             Images = [base64Image],
@@ -176,8 +183,8 @@ internal sealed class DeepSeekOcrService
             return new OcrViewerResult(
                 false,
                 string.Empty,
-                $"DeepSeek OCR request failed: {ex.Message}",
-                ModelName);
+                $"{DisplayName} request failed: {ex.Message}",
+                _modelName);
         }
 
         if (!response.IsSuccessStatusCode)
@@ -186,18 +193,18 @@ internal sealed class DeepSeekOcrService
             return new OcrViewerResult(
                 false,
                 string.Empty,
-                $"DeepSeek OCR returned HTTP {(int)response.StatusCode}: {errorBody}",
-                ModelName);
+                $"{DisplayName} returned HTTP {(int)response.StatusCode}: {errorBody}",
+                _modelName);
         }
 
         var payload = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: cancellationToken);
         var text = (payload?.Response ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
-            return new OcrViewerResult(false, string.Empty, "DeepSeek OCR returned no readable text.", ModelName);
+            return new OcrViewerResult(false, string.Empty, $"{DisplayName} returned no readable text.", _modelName);
         }
 
-        return new OcrViewerResult(true, text, string.Empty, payload?.Model ?? ModelName);
+        return new OcrViewerResult(true, text, string.Empty, payload?.Model ?? _modelName);
     }
 
     private sealed class OllamaTagsPayload

@@ -10,16 +10,24 @@ namespace DomainLinksDesktop;
 
 public partial class OcrViewerWindow : Window
 {
-    private readonly DeepSeekOcrService _ocrService;
+    private DeepSeekOcrService _ocrService;
+    private string _ocrModelName;
+    private readonly string _ollamaBaseUrl;
     private readonly System.Windows.Media.Brush _defaultStatusBrush =
         new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#23435A"));
     private const string PreviewHostName = "ocrviewer.local";
+    private static readonly string[] SuggestedOcrModels =
+    [
+        "deepseek-ocr:3b",
+        "glm-ocr:bf16",
+    ];
     private string? _selectedFilePath;
     private bool _isBusy;
 
     public OcrViewerWindow(string ollamaBaseUrl)
     {
         InitializeComponent();
+        _ollamaBaseUrl = ollamaBaseUrl;
         var settings = DomainLinksDesktopSettings.Load();
         Width = settings.OcrViewerWindowWidth;
         Height = settings.OcrViewerWindowHeight;
@@ -36,7 +44,11 @@ public partial class OcrViewerWindow : Window
         {
             PreviewColumn.Width = new GridLength(settings.OcrViewerPreviewPaneWidth);
         }
-        _ocrService = new DeepSeekOcrService(ollamaBaseUrl);
+        _ocrModelName = string.IsNullOrWhiteSpace(settings.OcrModel)
+            ? DomainLinksDesktopSettings.DefaultOcrModel
+            : settings.OcrModel.Trim();
+        _ocrService = new DeepSeekOcrService(_ollamaBaseUrl, _ocrModelName);
+        InitializeModelSelector();
         Loaded += OcrViewerWindow_OnLoaded;
         Closing += OcrViewerWindow_OnClosing;
         UpdateActionState();
@@ -70,7 +82,7 @@ public partial class OcrViewerWindow : Window
         _selectedFilePath = dialog.FileName;
         SelectedFileTextBlock.Text = _selectedFilePath;
         ExtractedTextTextBox.Clear();
-        EngineTextBlock.Text = $"Engine: {DeepSeekOcrService.ModelName}";
+        UpdateEngineLabel(_ocrModelName);
         SetStatus("File loaded. Review the preview, then run OCR.");
         ShowPreview(_selectedFilePath);
         UpdateActionState();
@@ -97,9 +109,9 @@ public partial class OcrViewerWindow : Window
         {
             _isBusy = true;
             UpdateActionState();
-            SetStatus("Running DeepSeek OCR...");
+            SetStatus($"Running {_ocrModelName}...");
             var result = await _ocrService.ExtractTextAsync(_selectedFilePath);
-            EngineTextBlock.Text = $"Engine: {result.EngineName}";
+            UpdateEngineLabel(result.EngineName);
 
             if (!result.Success)
             {
@@ -182,6 +194,26 @@ public partial class OcrViewerWindow : Window
         SetStatus("Status note copied to the clipboard.");
     }
 
+    private void OcrModelComboBox_OnSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        ApplySelectedModelFromUi();
+    }
+
+    private void OcrModelComboBox_OnLostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        ApplySelectedModelFromUi();
+    }
+
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
     {
         Close();
@@ -191,6 +223,7 @@ public partial class OcrViewerWindow : Window
     {
         var saved = DomainLinksDesktopSettings.Load() with
         {
+            OcrModel = _ocrModelName,
             OcrViewerWindowWidth = Width,
             OcrViewerWindowHeight = Height,
             OcrViewerWindowLeft = Left,
@@ -210,12 +243,41 @@ public partial class OcrViewerWindow : Window
         RetryButton.IsEnabled = !_isBusy && hasFile;
         CopyTextButton.IsEnabled = !_isBusy && hasText;
         SaveTextButton.IsEnabled = !_isBusy && hasText;
+        OcrModelComboBox.IsEnabled = !_isBusy;
     }
 
     private void SetStatus(string message, bool isError = false)
     {
         StatusTextBox.Text = message;
         StatusTextBox.Foreground = isError ? System.Windows.Media.Brushes.Firebrick : _defaultStatusBrush;
+    }
+
+    private void InitializeModelSelector()
+    {
+        OcrModelComboBox.ItemsSource = SuggestedOcrModels;
+        OcrModelComboBox.Text = _ocrModelName;
+        UpdateEngineLabel(_ocrModelName);
+    }
+
+    private void ApplySelectedModelFromUi()
+    {
+        var selectedModel = OcrModelComboBox.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(selectedModel) ||
+            string.Equals(selectedModel, _ocrModelName, StringComparison.OrdinalIgnoreCase))
+        {
+            OcrModelComboBox.Text = _ocrModelName;
+            return;
+        }
+
+        _ocrModelName = selectedModel;
+        _ocrService = new DeepSeekOcrService(_ollamaBaseUrl, _ocrModelName);
+        UpdateEngineLabel(_ocrModelName);
+        SetStatus($"OCR model changed to {_ocrModelName}.");
+    }
+
+    private void UpdateEngineLabel(string engineName)
+    {
+        EngineTextBlock.Text = $"Engine: {engineName}";
     }
 
     private void ShowEmptyPreview()
@@ -249,7 +311,7 @@ public partial class OcrViewerWindow : Window
                    <body>
                      <div class="card">
                        <h2>OCR preview is ready</h2>
-                       <p>Open a local PDF or image to inspect it here, then run DeepSeek OCR in this isolated tool.</p>
+                       <p>Open a local PDF or image to inspect it here, then run OCR in this isolated tool.</p>
                      </div>
                    </body>
                    </html>

@@ -8,10 +8,96 @@ from .config import Settings
 from .db import fetch_all, fetch_one, get_connection
 
 
+_CONTROL_TYPE_SORT_ORDER = {
+    "DIRECTIVE": 10,
+    "PREVENTIVE": 20,
+    "DETERRENT": 30,
+    "DETECTIVE": 40,
+    "CORRECTIVE": 50,
+    "COMPENSATING": 60,
+}
+
+
 def list_domains(settings: Settings) -> list[dict[str, object]]:
     rows = fetch_all(
         settings,
         """
+        WITH ActiveDomains AS (
+            SELECT
+                d.DomainId,
+                d.DomainParentId,
+                d.DomainTypeId,
+                d.DomainOrientationId,
+                d.DisplayOrder,
+                d.DomainCode,
+                d.DisplayName,
+                d.Description,
+                d.Status
+            FROM dbo.Domains d
+            WHERE d.Status = 'Active'
+        ),
+        DomainClosure AS (
+            SELECT
+                d.DomainId AS AncestorDomainId,
+                d.DomainId AS DescendantDomainId
+            FROM ActiveDomains d
+
+            UNION ALL
+
+            SELECT
+                dc.AncestorDomainId,
+                child.DomainId AS DescendantDomainId
+            FROM DomainClosure dc
+            JOIN ActiveDomains child
+                ON child.DomainParentId = dc.DescendantDomainId
+        ),
+        DirectCollectionCounts AS (
+            SELECT
+                c.DomainId,
+                COUNT(*) AS DirectCollectionCount
+            FROM dbo.Collections c
+            JOIN ActiveDomains d
+                ON d.DomainId = c.DomainId
+            WHERE c.Status = 'Active'
+            GROUP BY c.DomainId
+        ),
+        DirectPolicyCounts AS (
+            SELECT
+                p.RootDomainId AS DomainId,
+                COUNT(*) AS DirectPolicyCount
+            FROM dbo.Policies p
+            JOIN ActiveDomains d
+                ON d.DomainId = p.RootDomainId
+            WHERE p.Status IN ('Draft', 'Active')
+            GROUP BY p.RootDomainId
+        ),
+        DirectControlCounts AS (
+            SELECT
+                dc.DomainId,
+                COUNT(*) AS DirectControlCount
+            FROM dbo.DomainControls dc
+            JOIN dbo.Controls c
+                ON c.ControlId = dc.ControlId
+            JOIN ActiveDomains d
+                ON d.DomainId = dc.DomainId
+            WHERE c.Status IN ('Draft', 'Active')
+            GROUP BY dc.DomainId
+        ),
+        BranchCounts AS (
+            SELECT
+                dc.AncestorDomainId AS DomainId,
+                SUM(COALESCE(coll.DirectCollectionCount, 0)) AS BranchCollectionCount,
+                SUM(COALESCE(pol.DirectPolicyCount, 0)) AS BranchPolicyCount,
+                SUM(COALESCE(ctrl.DirectControlCount, 0)) AS BranchControlCount
+            FROM DomainClosure dc
+            LEFT JOIN DirectCollectionCounts coll
+                ON coll.DomainId = dc.DescendantDomainId
+            LEFT JOIN DirectPolicyCounts pol
+                ON pol.DomainId = dc.DescendantDomainId
+            LEFT JOIN DirectControlCounts ctrl
+                ON ctrl.DomainId = dc.DescendantDomainId
+            GROUP BY dc.AncestorDomainId
+        )
         SELECT
             d.DomainId,
             d.DomainParentId,
@@ -24,17 +110,22 @@ def list_domains(settings: Settings) -> list[dict[str, object]]:
             d.Status,
             dt.NAME AS DomainType,
             dor.CODE AS DomainOrientationCode,
-            dor.NAME AS DomainOrientation
-        FROM dbo.Domains d
+            dor.NAME AS DomainOrientation,
+            COALESCE(bc.BranchCollectionCount, 0) AS BranchCollectionCount,
+            COALESCE(bc.BranchPolicyCount, 0) AS BranchPolicyCount,
+            COALESCE(bc.BranchControlCount, 0) AS BranchControlCount
+        FROM ActiveDomains d
         LEFT JOIN dbo.DomainTypes dt
             ON dt.ID = d.DomainTypeId
         LEFT JOIN dbo.DomainOrientations dor
             ON dor.ID = d.DomainOrientationId
-        WHERE d.Status = 'Active'
+        LEFT JOIN BranchCounts bc
+            ON bc.DomainId = d.DomainId
         ORDER BY
             CASE WHEN d.DomainCode = 'workspace-memory' THEN 0 ELSE 1 END,
             d.DisplayOrder,
             d.DisplayName
+        OPTION (MAXRECURSION 32767)
         """,
     )
     return [_normalize_row(row) for row in rows]
@@ -173,7 +264,15 @@ def list_control_types(settings: Settings) -> list[dict[str, object]]:
         ORDER BY DISPLAY_ORDER, NAME
         """,
     )
-    return [_normalize_row(row) for row in rows]
+    normalized_rows = [_normalize_row(row) for row in rows]
+    return sorted(
+        normalized_rows,
+        key=lambda row: (
+            _CONTROL_TYPE_SORT_ORDER.get(str(row.get("CODE") or "").strip().upper(), 999),
+            int(row.get("DISPLAY_ORDER") or 0),
+            str(row.get("NAME") or "").lower(),
+        ),
+    )
 
 
 def list_controls_for_branch(settings: Settings, branch_root_domain_code: str) -> list[dict[str, object]]:
@@ -221,6 +320,15 @@ def list_controls_for_branch(settings: Settings, branch_root_domain_code: str) -
           AND c.Status IN ('Draft', 'Active')
         ORDER BY
             CASE WHEN d.DomainCode = ? THEN 0 ELSE 1 END,
+            CASE UPPER(ct.CODE)
+                WHEN 'DIRECTIVE' THEN 10
+                WHEN 'PREVENTIVE' THEN 20
+                WHEN 'DETERRENT' THEN 30
+                WHEN 'DETECTIVE' THEN 40
+                WHEN 'CORRECTIVE' THEN 50
+                WHEN 'COMPENSATING' THEN 60
+                ELSE 999
+            END,
             d.DisplayName,
             c.DisplayName
         """,
@@ -486,6 +594,94 @@ def create_control_from_suggestion(
 
     if row is None:
         raise ValueError("Control was not created.")
+
+    return _normalize_row(_row_to_dict(cursor, row))
+
+
+def update_control(
+    settings: Settings,
+    control_id: str,
+    control_type_code: str,
+    display_name: str,
+    description: str | None,
+    control_objective: str | None,
+    evidence_expectation: str | None,
+) -> dict[str, object]:
+    normalized_control_id = str(control_id or "").strip()
+    normalized_type_code = re.sub(r"[^A-Z0-9_]+", "_", control_type_code.strip().upper()).strip("_")
+    normalized_display_name = display_name.strip()
+
+    if not normalized_control_id:
+        raise ValueError("ControlId is required.")
+    if not normalized_type_code:
+        raise ValueError("Control type is required.")
+    if not normalized_display_name:
+        raise ValueError("Display name is required.")
+
+    with get_connection(settings) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SET NOCOUNT ON;
+
+            UPDATE c
+            SET
+                c.ControlTypeId = ct.ID,
+                c.DisplayName = ?,
+                c.Description = ?,
+                c.ControlObjective = ?,
+                c.EvidenceExpectation = ?,
+                c.UpdatedAtUtc = SYSUTCDATETIME()
+            FROM dbo.Controls c
+            JOIN dbo.ControlTypes ct
+                ON ct.CODE = ?
+            WHERE c.ControlId = ?;
+
+            IF @@ROWCOUNT = 0
+            BEGIN
+                THROW 51000, 'Control was not found or control type was invalid.', 1;
+            END;
+
+            SELECT TOP (1)
+                c.ControlId,
+                c.ControlTypeId,
+                c.ControlCode,
+                c.DisplayName,
+                c.Description,
+                c.ControlObjective,
+                c.EvidenceExpectation,
+                c.Status,
+                ct.CODE AS ControlTypeCode,
+                ct.NAME AS ControlTypeName,
+                ct.DESCRIPTION AS ControlTypeDescription,
+                d.DomainCode,
+                d.DisplayName AS DomainDisplayName,
+                CAST(1 AS bit) AS IsCurrentDomainControl
+            FROM dbo.Controls c
+            JOIN dbo.ControlTypes ct
+                ON ct.ID = c.ControlTypeId
+            JOIN dbo.DomainControls dc
+                ON dc.ControlId = c.ControlId
+            JOIN dbo.Domains d
+                ON d.DomainId = dc.DomainId
+            WHERE c.ControlId = ?
+            ORDER BY dc.IsPrimary DESC, dc.DisplayOrder, d.DisplayName;
+            """,
+            [
+                normalized_display_name,
+                description,
+                control_objective,
+                evidence_expectation,
+                normalized_type_code,
+                normalized_control_id,
+                normalized_control_id,
+            ],
+        )
+        row = cursor.fetchone()
+        connection.commit()
+
+    if row is None:
+        raise ValueError("Control was not updated.")
 
     return _normalize_row(_row_to_dict(cursor, row))
 

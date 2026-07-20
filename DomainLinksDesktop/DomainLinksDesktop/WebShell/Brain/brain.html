@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DomainLinks Brain</title>
+  <link rel="stylesheet" href="brain.css">
+  <link rel="stylesheet" href="brain-controls.css">
+</head>
+<body>
+  <header>
+    <div><strong>DomainLinks Brain</strong><span id="scope-label">Knowledge explorer</span></div>
+    <div class="header-actions"><button id="fit">Fit</button><button id="reset">Reset</button><button id="close">Close</button></div>
+  </header>
+  <main>
+    <aside class="tools">
+      <label for="search">Find a node</label>
+      <div class="search-row"><input id="search" placeholder="Search knowledge…"><button id="find">Find</button></div>
+      <section><h2>Node types</h2><div id="type-filters" class="checks"></div></section>
+      <section><h2>Layers</h2>
+        <label><input id="show-gaps" type="checkbox" checked> Gap indicators</label>
+        <label><input id="show-density" type="checkbox" checked> Knowledge density</label>
+        <label><input id="show-semantic" type="checkbox" checked> Semantic links</label>
+      </section>
+      <section><h2>Summary</h2><div id="summary" class="summary"></div></section>
+      <section><h2>Semantic embeddings</h2><div id="embedding-status" class="summary">Checking…</div>
+        <div class="embedding-actions"><button data-embed-command="pending">Embed pending</button><button data-embed-command="retry">Retry failures</button><button data-embed-command="rebuild">Rebuild all</button></div>
+      </section>
+      <div id="notice" class="notice" hidden></div>
+    </aside>
+    <section id="canvas-wrap">
+      <svg id="canvas" aria-label="Interactive knowledge graph">
+        <g id="viewport"><g id="edges"></g><g id="nodes"></g></g>
+      </svg>
+      <div class="legend"><span class="dot domain"></span>Domain <span class="dot collection"></span>Collection <span class="dot document"></span>Document <span class="dot policy"></span>Policy <span class="dot control"></span>Control <span class="dot policy-statement"></span>Statement</div>
+    </section>
+    <aside class="details">
+      <div id="empty-detail"><h2>Select a node</h2><p>Choose an item to inspect its metadata, gaps, and relationships.</p></div>
+      <div id="node-detail" hidden>
+        <span id="detail-type" class="badge"></span><h1 id="detail-title"></h1><p id="detail-description"></p>
+        <div id="detail-density"></div><h2>Knowledge gaps</h2><div id="detail-gaps"></div>
+        <button id="expand" hidden>Expand content units</button>
+      </div>
+    </aside>
+  </main>
+  <script src="brain.js"></script>
+</body>
+</html>

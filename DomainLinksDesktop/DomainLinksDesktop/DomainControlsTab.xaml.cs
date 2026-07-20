@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Net.Http.Json;
-using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -10,6 +9,7 @@ namespace DomainLinksDesktop;
 public partial class DomainControlsTab : UserControl
 {
     private const string ControlSuggestionModelName = "qwen3.5:35b-mlx";
+    private static readonly string[] AutoControlTypeOrder = ["DIRECTIVE", "PREVENTIVE", "DETERRENT", "DETECTIVE", "CORRECTIVE", "COMPENSATING"];
     private readonly ObservableCollection<ControlTypeOption> _controlTypeOptions = [];
     private DomainLinksDesktopSettings? _settings;
     private HttpClient? _httpClient;
@@ -17,6 +17,7 @@ public partial class DomainControlsTab : UserControl
     private string? _loadedDomainCode;
     private int _loadRequestVersion;
     private bool _isActive;
+    private bool _isDetailEditMode;
     private ControlSuggestionItem? _selectedSuggestion;
     private ControlListItem? _selectedSavedControl;
 
@@ -24,13 +25,28 @@ public partial class DomainControlsTab : UserControl
     public ObservableCollection<ControlListDisplayItem> DisplayControls { get; } = [];
     public ObservableCollection<ControlSuggestionItem> Suggestions { get; } = [];
 
+    internal BrainLaunchContext? GetBrainLaunchContext()
+    {
+        if (BranchControlsDataGrid.SelectedItem is ControlListDisplayItem { Control: { } control })
+        {
+            return new BrainLaunchContext(BrainScopeKind.Control, control.ControlId, control.DisplayName,
+                FocusNodeId: $"control:{control.ControlId}");
+        }
+        return _selectedDomain is null
+            ? null
+            : new BrainLaunchContext(BrainScopeKind.Domain, _selectedDomain.DomainCode, _selectedDomain.DisplayName,
+                FocusNodeId: $"domain:{_selectedDomain.DomainId}");
+    }
+
     public DomainControlsTab()
     {
         InitializeComponent();
 
         CountComboBox.ItemsSource = new[] { 1, 3, 5, 8, 10 };
         ControlTypeComboBox.ItemsSource = _controlTypeOptions;
+        DetailControlTypeComboBox.ItemsSource = _controlTypeOptions;
         Loaded += DomainControlsTab_OnLoaded;
+        ClearDetailEditor();
     }
 
     internal void Configure(DomainLinksDesktopSettings settings)
@@ -114,6 +130,7 @@ public partial class DomainControlsTab : UserControl
             BranchSummaryTextBlock.Text = "Select a domain to load controls.";
             BranchControls.Clear();
             DisplayControls.Clear();
+            ClearDetailEditor();
             return;
         }
 
@@ -138,7 +155,7 @@ public partial class DomainControlsTab : UserControl
                 Suggestions.Clear();
                 _selectedSuggestion = null;
                 _selectedSavedControl = null;
-                DraftDetailTextBlock.Text = string.Empty;
+                ClearDetailEditor();
                 RebuildDisplayControls();
                 UpdateDraftButtons();
             }
@@ -247,7 +264,7 @@ public partial class DomainControlsTab : UserControl
 
             _selectedSuggestion = null;
             _selectedSavedControl = null;
-            DraftDetailTextBlock.Text = string.Empty;
+            ClearDetailEditor();
             RebuildDisplayControls();
             UpdateDraftButtons();
             ControlsStatusTextBlock.Text = $"Generated {Suggestions.Count} pending suggestions.";
@@ -263,17 +280,84 @@ public partial class DomainControlsTab : UserControl
         }
     }
 
+    private async void AutoCreateControlsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_httpClient is null || !EnsureSelectedDomain())
+        {
+            return;
+        }
+
+        var totalToCreate = AutoControlTypeOrder.Length * 3;
+        var confirm = MessageBox.Show(
+            Window.GetWindow(this),
+            $"Auto-create {totalToCreate} controls for {_selectedDomain?.DisplayName} in this order?\n\nDirective, Preventive, Deterrent, Detective, Corrective, Compensating",
+            "Auto Create Controls",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_isActive)
+            {
+                await LoadForSelectedDomainAsync(force: false);
+            }
+
+            SetBusyState(true, "Auto-creating controls...");
+            Suggestions.Clear();
+            _selectedSuggestion = null;
+            _selectedSavedControl = null;
+            ClearDetailEditor();
+            RebuildDisplayControls();
+            UpdateDraftButtons();
+
+            var createdControls = new List<ControlListItem>();
+            var focus = IdeaTextBox.Text.Trim();
+            var completed = 0;
+
+            foreach (var controlTypeCode in AutoControlTypeOrder)
+            {
+                for (var index = 1; index <= 3; index++)
+                {
+                    completed++;
+                    ControlsStatusTextBlock.Text = $"Auto-creating {completed}/{totalToCreate}: {controlTypeCode} #{index}";
+                    var suggestion = await GenerateSingleAutoSuggestionAsync(controlTypeCode, index, createdControls, focus);
+                    var createdControl = await ExecuteSuggestionAsync(suggestion);
+                    createdControls.Add(createdControl);
+                    BranchControls.Add(createdControl);
+                    RebuildDisplayControls();
+                }
+            }
+
+            await LoadForSelectedDomainAsync(force: true);
+            ControlsStatusTextBlock.Text = $"Auto-created {createdControls.Count} controls.";
+        }
+        catch (Exception ex)
+        {
+            ControlsStatusTextBlock.Text = $"Auto-create failed: {ex.Message}";
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Auto Create Controls", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusyState(false);
+        }
+    }
+
     private void BranchControlsDataGrid_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (BranchControlsDataGrid.SelectedItem is not ControlListDisplayItem item)
         {
             _selectedSuggestion = null;
             _selectedSavedControl = null;
-            DraftDetailTextBlock.Text = string.Empty;
+            ClearDetailEditor();
             UpdateDraftButtons();
             return;
         }
 
+        _isDetailEditMode = false;
         if (item.Suggestion is not null)
         {
             _selectedSuggestion = item.Suggestion;
@@ -292,9 +376,45 @@ public partial class DomainControlsTab : UserControl
         {
             _selectedSuggestion = null;
             _selectedSavedControl = null;
-            DraftDetailTextBlock.Text = string.Empty;
+            ClearDetailEditor();
         }
 
+        SetDetailMode(false);
+        UpdateDraftButtons();
+    }
+
+    private void EditDetailButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedSuggestion is null && _selectedSavedControl is null)
+        {
+            return;
+        }
+
+        _isDetailEditMode = !_isDetailEditMode;
+        if (_isDetailEditMode)
+        {
+            if (_selectedSuggestion is not null)
+            {
+                LoadEditor(_selectedSuggestion);
+            }
+            else if (_selectedSavedControl is not null)
+            {
+                LoadEditor(_selectedSavedControl);
+            }
+        }
+        else
+        {
+            if (_selectedSuggestion is not null)
+            {
+                DraftDetailTextBlock.Text = BuildDraftDetail(_selectedSuggestion);
+            }
+            else if (_selectedSavedControl is not null)
+            {
+                DraftDetailTextBlock.Text = BuildSavedControlDetail(_selectedSavedControl);
+            }
+        }
+
+        SetDetailMode(_isDetailEditMode);
         UpdateDraftButtons();
     }
 
@@ -335,50 +455,99 @@ public partial class DomainControlsTab : UserControl
             return;
         }
 
+        if (_isDetailEditMode)
+        {
+            ApplyEditorToSelectedSuggestion();
+        }
         ShowReadOnlyTextWindow("Control SQL Preview", _selectedSuggestion.DisplayName, _selectedSuggestion.SqlPreview);
     }
 
     private async void RunInsertButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_httpClient is null || _selectedSuggestion is null)
+        if (_httpClient is null)
         {
             return;
         }
 
         try
         {
-            SetBusyState(true, $"Inserting {_selectedSuggestion.DisplayName}...");
-            var response = await _httpClient.PostAsJsonAsync(
-                "/controls/suggest/execute",
-                new
-                {
-                    domainCode = _selectedSuggestion.DomainCode,
-                    controlTypeCode = _selectedSuggestion.ControlTypeCode,
-                    displayName = _selectedSuggestion.DisplayName,
-                    description = _selectedSuggestion.Description,
-                    controlObjective = _selectedSuggestion.ControlObjective,
-                    evidenceExpectation = _selectedSuggestion.EvidenceExpectation,
-                    controlCode = _selectedSuggestion.ControlCode,
-                });
-            if (!response.IsSuccessStatusCode)
+            if (_selectedSuggestion is not null)
             {
-                throw new InvalidOperationException(await ReadErrorAsync(response));
+                if (_isDetailEditMode)
+                {
+                    ApplyEditorToSelectedSuggestion();
+                }
+                SetBusyState(true, $"Inserting {_selectedSuggestion.DisplayName}...");
+                var response = await _httpClient.PostAsJsonAsync(
+                    "/controls/suggest/execute",
+                    new
+                    {
+                        domainCode = _selectedSuggestion.DomainCode,
+                        controlTypeCode = _selectedSuggestion.ControlTypeCode,
+                        displayName = _selectedSuggestion.DisplayName,
+                        description = _selectedSuggestion.Description,
+                        controlObjective = _selectedSuggestion.ControlObjective,
+                        evidenceExpectation = _selectedSuggestion.EvidenceExpectation,
+                        controlCode = _selectedSuggestion.ControlCode,
+                    });
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException(await ReadErrorAsync(response));
+                }
+
+                await response.Content.ReadFromJsonAsync<ControlExecutionResponse>();
+                Suggestions.Remove(_selectedSuggestion);
+                _selectedSuggestion = null;
+                _selectedSavedControl = null;
+                ClearDetailEditor();
+                RebuildDisplayControls();
+                UpdateDraftButtons();
+                await LoadForSelectedDomainAsync(force: true);
+                ControlsStatusTextBlock.Text = "Control inserted and branch list refreshed.";
+                return;
             }
 
-            await response.Content.ReadFromJsonAsync<ControlExecutionResponse>();
-            Suggestions.Remove(_selectedSuggestion);
-            _selectedSuggestion = null;
-            _selectedSavedControl = null;
-            DraftDetailTextBlock.Text = string.Empty;
-            RebuildDisplayControls();
-            UpdateDraftButtons();
-            await LoadForSelectedDomainAsync(force: true);
-            ControlsStatusTextBlock.Text = "Control inserted and branch list refreshed.";
+            if (_selectedSavedControl is not null)
+            {
+                if (!_isDetailEditMode)
+                {
+                    return;
+                }
+                var payload = BuildEditorRequestPayload();
+                var savedControlId = _selectedSavedControl.ControlId;
+                SetBusyState(true, $"Saving {_selectedSavedControl.DisplayName}...");
+                var response = await _httpClient.PutAsJsonAsync(
+                    $"/controls/{Uri.EscapeDataString(savedControlId)}",
+                    payload);
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException(await ReadErrorAsync(response));
+                }
+
+                await LoadForSelectedDomainAsync(force: true);
+                _selectedSavedControl = BranchControls.FirstOrDefault(item =>
+                    string.Equals(item.ControlId, savedControlId, StringComparison.OrdinalIgnoreCase));
+                if (_selectedSavedControl is not null)
+                {
+                    var selectedDisplayItem = DisplayControls.FirstOrDefault(item =>
+                        item.Control is not null
+                        && string.Equals(item.Control.ControlId, savedControlId, StringComparison.OrdinalIgnoreCase));
+                    if (selectedDisplayItem is not null)
+                    {
+                        BranchControlsDataGrid.SelectedItem = selectedDisplayItem;
+                        BranchControlsDataGrid.ScrollIntoView(selectedDisplayItem);
+                    }
+                    _isDetailEditMode = false;
+                    DraftDetailTextBlock.Text = BuildSavedControlDetail(_selectedSavedControl);
+                    SetDetailMode(false);
+                }
+                ControlsStatusTextBlock.Text = "Control updated.";
+            }
         }
         catch (Exception ex)
         {
-            ControlsStatusTextBlock.Text = $"Insert failed: {ex.Message}";
-            MessageBox.Show(Window.GetWindow(this), ex.Message, "Run Insert", MessageBoxButton.OK, MessageBoxImage.Error);
+            ControlsStatusTextBlock.Text = $"Save failed: {ex.Message}";
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Controls", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -400,6 +569,116 @@ public partial class DomainControlsTab : UserControl
             count,
             model = ControlSuggestionModelName,
         };
+    }
+
+    private object BuildEditorRequestPayload()
+    {
+        var displayName = DetailNameTextBox.Text.Trim();
+        var controlTypeCode = (DetailControlTypeComboBox.SelectedItem as ControlTypeOption)?.Code;
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            throw new InvalidOperationException("Control name is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(controlTypeCode))
+        {
+            throw new InvalidOperationException("Control type is required.");
+        }
+
+        return new
+        {
+            controlTypeCode,
+            displayName,
+            description = NormalizeMultilineField(DetailDescriptionTextBox.Text),
+            controlObjective = NormalizeMultilineField(DetailObjectiveTextBox.Text),
+            evidenceExpectation = NormalizeMultilineField(DetailEvidenceTextBox.Text),
+        };
+    }
+
+    private async Task<ControlSuggestionItem> GenerateSingleAutoSuggestionAsync(
+        string controlTypeCode,
+        int ordinalWithinType,
+        IReadOnlyList<ControlListItem> createdControls,
+        string focus)
+    {
+        if (_httpClient is null || _selectedDomain is null)
+        {
+            throw new InvalidOperationException("A selected domain is required.");
+        }
+
+        var response = await _httpClient.PostAsJsonAsync(
+            "/controls/suggest",
+            new
+            {
+                branchRootDomainCode = _selectedDomain.DomainCode,
+                mode = "auto-sequence",
+                idea = string.IsNullOrWhiteSpace(focus) ? null : focus,
+                controlTypeCode,
+                count = 1,
+                model = ControlSuggestionModelName,
+                sequenceStepLabel = $"{controlTypeCode} control {ordinalWithinType} of 3",
+                sequenceContext = BuildAutoSequenceContext(createdControls),
+            });
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(await ReadErrorAsync(response));
+        }
+
+        var payload = await response.Content.ReadFromJsonAsync<ControlSuggestionResponse>();
+        var suggestion = payload?.Suggestions?.FirstOrDefault();
+        if (suggestion is null)
+        {
+            throw new InvalidOperationException($"No suggestion returned for {controlTypeCode} control {ordinalWithinType}.");
+        }
+
+        suggestion.ControlTypeDescription = GetControlTypeDescription(suggestion.ControlTypeCode);
+        return suggestion;
+    }
+
+    private async Task<ControlListItem> ExecuteSuggestionAsync(ControlSuggestionItem suggestion)
+    {
+        if (_httpClient is null)
+        {
+            throw new InvalidOperationException("HTTP client is not configured.");
+        }
+
+        var response = await _httpClient.PostAsJsonAsync(
+            "/controls/suggest/execute",
+            new
+            {
+                domainCode = suggestion.DomainCode,
+                controlTypeCode = suggestion.ControlTypeCode,
+                displayName = suggestion.DisplayName,
+                description = suggestion.Description,
+                controlObjective = suggestion.ControlObjective,
+                evidenceExpectation = suggestion.EvidenceExpectation,
+                controlCode = suggestion.ControlCode,
+            });
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(await ReadErrorAsync(response));
+        }
+
+        var payload = await response.Content.ReadFromJsonAsync<ControlExecutionResponse>();
+        if (payload?.CreatedControl is null)
+        {
+            throw new InvalidOperationException($"The control '{suggestion.DisplayName}' was not returned after insert.");
+        }
+
+        return payload.CreatedControl;
+    }
+
+    private static string BuildAutoSequenceContext(IReadOnlyList<ControlListItem> createdControls)
+    {
+        if (createdControls.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            Environment.NewLine,
+            createdControls.Select(control =>
+                $"- {control.DisplayName} [{control.ControlCode}] type={control.ControlTypeCode} objective={control.ControlObjective}"));
     }
 
     private bool EnsureSelectedDomain()
@@ -424,22 +703,32 @@ public partial class DomainControlsTab : UserControl
     {
         var hasSuggestion = _selectedSuggestion is not null;
         var hasSavedControl = _selectedSavedControl is not null;
+        var hasSelection = hasSuggestion || hasSavedControl;
         RejectOrDeleteButton.IsEnabled = hasSuggestion || hasSavedControl;
         RejectOrDeleteButton.Content = hasSuggestion ? "Reject" : hasSavedControl ? "Delete" : "Remove";
         SqlPreviewButton.IsEnabled = hasSuggestion;
-        RunInsertButton.IsEnabled = hasSuggestion;
+        RunInsertButton.IsEnabled = hasSuggestion || (hasSavedControl && _isDetailEditMode);
+        RunInsertButton.Content = hasSuggestion ? "Run Insert" : hasSavedControl ? "Save Changes" : "Apply";
+        EditDetailButton.IsEnabled = hasSelection;
+        EditDetailButton.Content = _isDetailEditMode ? "👓" : "✎";
+        SetDetailEditorEnabled(_isDetailEditMode && hasSelection);
     }
 
     private void RebuildDisplayControls()
     {
         DisplayControls.Clear();
 
-        foreach (var control in BranchControls)
+        foreach (var control in BranchControls
+                     .OrderBy(item => GetControlTypeSortOrder(item.ControlTypeCode))
+                     .ThenBy(item => item.IsCurrentDomainControl ? 0 : 1)
+                     .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             DisplayControls.Add(ControlListDisplayItem.FromSaved(control));
         }
 
-        foreach (var suggestion in Suggestions)
+        foreach (var suggestion in Suggestions
+                     .OrderBy(item => GetControlTypeSortOrder(item.ControlTypeCode))
+                     .ThenBy(item => item.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             DisplayControls.Add(ControlListDisplayItem.FromSuggestion(suggestion, _selectedDomain));
         }
@@ -448,10 +737,11 @@ public partial class DomainControlsTab : UserControl
     private void SetBusyState(bool isBusy, string? statusText = null)
     {
         RefreshControlsButton.IsEnabled = !isBusy;
+        AutoCreateControlsButton.IsEnabled = !isBusy;
         PromptPreviewButton.IsEnabled = !isBusy;
         GenerateSuggestionsButton.IsEnabled = !isBusy;
         RejectOrDeleteButton.IsEnabled = !isBusy && (_selectedSuggestion is not null || _selectedSavedControl is not null);
-        RunInsertButton.IsEnabled = !isBusy && _selectedSuggestion is not null;
+        RunInsertButton.IsEnabled = !isBusy && (_selectedSuggestion is not null || _selectedSavedControl is not null);
         SqlPreviewButton.IsEnabled = !isBusy && _selectedSuggestion is not null;
         if (!string.IsNullOrWhiteSpace(statusText))
         {
@@ -468,7 +758,7 @@ public partial class DomainControlsTab : UserControl
             _selectedSuggestion = null;
             _selectedSavedControl = null;
             BranchControlsDataGrid.SelectedItem = null;
-            DraftDetailTextBlock.Text = string.Empty;
+            ClearDetailEditor();
             RebuildDisplayControls();
             UpdateDraftButtons();
             ControlsStatusTextBlock.Text = $"Rejected suggestion: {suggestionName}";
@@ -504,7 +794,7 @@ public partial class DomainControlsTab : UserControl
             _selectedSavedControl = null;
             _selectedSuggestion = null;
             BranchControlsDataGrid.SelectedItem = null;
-            DraftDetailTextBlock.Text = string.Empty;
+            ClearDetailEditor();
             UpdateDraftButtons();
             await LoadForSelectedDomainAsync(force: true);
             ControlsStatusTextBlock.Text = $"Deleted control: {control.DisplayName}";
@@ -536,53 +826,56 @@ public partial class DomainControlsTab : UserControl
         return domain?.SourceDomain ?? domain;
     }
 
+    private void LoadEditor(ControlSuggestionItem suggestion)
+    {
+        DetailModeTextBlock.Text = "Editing pending suggestion";
+        DetailMetaTextBlock.Text = $"Domain: {suggestion.DomainCode}";
+        DetailNameTextBox.Text = suggestion.DisplayName;
+        SelectDetailControlType(suggestion.ControlTypeCode);
+        DetailCodeTextBox.Text = suggestion.ControlCode;
+        DetailDescriptionTextBox.Text = suggestion.Description;
+        DetailObjectiveTextBox.Text = suggestion.ControlObjective;
+        DetailEvidenceTextBox.Text = suggestion.EvidenceExpectation;
+    }
+
+    private void LoadEditor(ControlListItem control)
+    {
+        DetailModeTextBlock.Text = "Editing saved control";
+        DetailMetaTextBlock.Text = $"Domain: {control.DomainDisplayName} ({control.DomainCode}) | Status: {control.Status}";
+        DetailNameTextBox.Text = control.DisplayName;
+        SelectDetailControlType(control.ControlTypeCode);
+        DetailCodeTextBox.Text = control.ControlCode;
+        DetailDescriptionTextBox.Text = control.Description;
+        DetailObjectiveTextBox.Text = control.ControlObjective;
+        DetailEvidenceTextBox.Text = control.EvidenceExpectation;
+    }
+
     private static string BuildDraftDetail(ControlSuggestionItem suggestion)
     {
-        var builder = new StringBuilder();
-        builder.AppendLine($"Domain: {suggestion.DomainCode}");
-        builder.AppendLine($"Control: {suggestion.DisplayName}");
-        builder.AppendLine($"Code: {suggestion.ControlCode}");
-        builder.AppendLine($"Type: {suggestion.ControlTypeCode}");
-        if (!string.IsNullOrWhiteSpace(suggestion.ControlTypeDescription))
-        {
-            builder.AppendLine($"Type Description: {suggestion.ControlTypeDescription}");
-        }
-        builder.AppendLine();
-        builder.AppendLine("Description");
-        builder.AppendLine(suggestion.Description);
-        builder.AppendLine();
-        builder.AppendLine("Objective");
-        builder.AppendLine(suggestion.ControlObjective);
-        builder.AppendLine();
-        builder.AppendLine("Evidence");
-        builder.AppendLine(suggestion.EvidenceExpectation);
-        return builder.ToString();
+        return
+            $"Domain: {suggestion.DomainCode}{Environment.NewLine}" +
+            $"Control: {suggestion.DisplayName}{Environment.NewLine}" +
+            $"Code: {suggestion.ControlCode}{Environment.NewLine}" +
+            $"Type: {suggestion.ControlTypeCode}" +
+            (string.IsNullOrWhiteSpace(suggestion.ControlTypeDescription) ? string.Empty : $" | {suggestion.ControlTypeDescription}") +
+            $"{Environment.NewLine}{Environment.NewLine}Description{Environment.NewLine}{suggestion.Description}" +
+            $"{Environment.NewLine}{Environment.NewLine}Objective{Environment.NewLine}{suggestion.ControlObjective}" +
+            $"{Environment.NewLine}{Environment.NewLine}Evidence{Environment.NewLine}{suggestion.EvidenceExpectation}";
     }
 
     private static string BuildSavedControlDetail(ControlListItem control)
     {
-        var builder = new StringBuilder();
-        builder.AppendLine("Saved Control");
-        builder.AppendLine();
-        builder.AppendLine($"Domain: {control.DomainDisplayName} ({control.DomainCode})");
-        builder.AppendLine($"Control: {control.DisplayName}");
-        builder.AppendLine($"Code: {control.ControlCode}");
-        builder.AppendLine($"Type: {control.ControlTypeName} ({control.ControlTypeCode})");
-        if (!string.IsNullOrWhiteSpace(control.ControlTypeDescription))
-        {
-            builder.AppendLine($"Type Description: {control.ControlTypeDescription}");
-        }
-        builder.AppendLine($"Status: {control.Status}");
-        builder.AppendLine();
-        builder.AppendLine("Description");
-        builder.AppendLine(control.Description);
-        builder.AppendLine();
-        builder.AppendLine("Objective");
-        builder.AppendLine(control.ControlObjective);
-        builder.AppendLine();
-        builder.AppendLine("Evidence");
-        builder.AppendLine(control.EvidenceExpectation);
-        return builder.ToString();
+        return
+            $"Saved Control{Environment.NewLine}{Environment.NewLine}" +
+            $"Domain: {control.DomainDisplayName} ({control.DomainCode}){Environment.NewLine}" +
+            $"Control: {control.DisplayName}{Environment.NewLine}" +
+            $"Code: {control.ControlCode}{Environment.NewLine}" +
+            $"Type: {control.ControlTypeName} ({control.ControlTypeCode})" +
+            (string.IsNullOrWhiteSpace(control.ControlTypeDescription) ? string.Empty : $" | {control.ControlTypeDescription}") +
+            $"{Environment.NewLine}Status: {control.Status}" +
+            $"{Environment.NewLine}{Environment.NewLine}Description{Environment.NewLine}{control.Description}" +
+            $"{Environment.NewLine}{Environment.NewLine}Objective{Environment.NewLine}{control.ControlObjective}" +
+            $"{Environment.NewLine}{Environment.NewLine}Evidence{Environment.NewLine}{control.EvidenceExpectation}";
     }
 
     private static async Task<string> ReadErrorAsync(HttpResponseMessage response)
@@ -599,6 +892,121 @@ public partial class DomainControlsTab : UserControl
             .FirstOrDefault(item => string.Equals(item.Code, controlTypeCode, StringComparison.OrdinalIgnoreCase))
             ?.Description
             ?? string.Empty;
+    }
+
+    private void ApplyEditorToSelectedSuggestion()
+    {
+        if (_selectedSuggestion is null)
+        {
+            return;
+        }
+
+        var controlTypeCode = (DetailControlTypeComboBox.SelectedItem as ControlTypeOption)?.Code;
+        var displayName = DetailNameTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(controlTypeCode))
+        {
+            throw new InvalidOperationException("Control type is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            throw new InvalidOperationException("Control name is required.");
+        }
+
+        _selectedSuggestion.ControlTypeCode = controlTypeCode;
+        _selectedSuggestion.ControlTypeDescription = GetControlTypeDescription(controlTypeCode);
+        _selectedSuggestion.DisplayName = displayName;
+        _selectedSuggestion.Description = NormalizeMultilineField(DetailDescriptionTextBox.Text) ?? string.Empty;
+        _selectedSuggestion.ControlObjective = NormalizeMultilineField(DetailObjectiveTextBox.Text) ?? string.Empty;
+        _selectedSuggestion.EvidenceExpectation = NormalizeMultilineField(DetailEvidenceTextBox.Text) ?? string.Empty;
+        _selectedSuggestion.SqlPreview = BuildControlInsertPreview(
+            _selectedSuggestion.DomainCode,
+            _selectedSuggestion.ControlTypeCode,
+            _selectedSuggestion.ControlCode,
+            _selectedSuggestion.DisplayName,
+            _selectedSuggestion.Description,
+            _selectedSuggestion.ControlObjective,
+            _selectedSuggestion.EvidenceExpectation);
+        RebuildDisplayControls();
+    }
+
+    private static int GetControlTypeSortOrder(string? controlTypeCode)
+    {
+        var normalizedCode = (controlTypeCode ?? string.Empty).Trim().ToUpperInvariant();
+        var index = Array.IndexOf(AutoControlTypeOrder, normalizedCode);
+        return index >= 0 ? index : int.MaxValue;
+    }
+
+    private void ClearDetailEditor()
+    {
+        _isDetailEditMode = false;
+        DraftDetailTextBlock.Text = string.Empty;
+        DetailModeTextBlock.Text = "Select a control or suggestion.";
+        DetailMetaTextBlock.Text = string.Empty;
+        DetailNameTextBox.Text = string.Empty;
+        DetailControlTypeComboBox.SelectedItem = null;
+        DetailCodeTextBox.Text = string.Empty;
+        DetailDescriptionTextBox.Text = string.Empty;
+        DetailObjectiveTextBox.Text = string.Empty;
+        DetailEvidenceTextBox.Text = string.Empty;
+        SetDetailMode(false);
+        SetDetailEditorEnabled(false);
+    }
+
+    private void SetDetailMode(bool isEditMode)
+    {
+        DetailViewScrollViewer.Visibility = isEditMode ? Visibility.Collapsed : Visibility.Visible;
+        DetailEditScrollViewer.Visibility = isEditMode ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void SetDetailEditorEnabled(bool isEnabled)
+    {
+        DetailNameTextBox.IsEnabled = isEnabled;
+        DetailControlTypeComboBox.IsEnabled = isEnabled;
+        DetailDescriptionTextBox.IsEnabled = isEnabled;
+        DetailObjectiveTextBox.IsEnabled = isEnabled;
+        DetailEvidenceTextBox.IsEnabled = isEnabled;
+    }
+
+    private void SelectDetailControlType(string controlTypeCode)
+    {
+        DetailControlTypeComboBox.SelectedItem = _controlTypeOptions
+            .FirstOrDefault(item => string.Equals(item.Code, controlTypeCode, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? NormalizeMultilineField(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string BuildControlInsertPreview(
+        string domainCode,
+        string controlTypeCode,
+        string controlCode,
+        string displayName,
+        string? description,
+        string? controlObjective,
+        string? evidenceExpectation)
+    {
+        return
+            $"DECLARE @DomainCode NVARCHAR(100) = {ToSqlNVarCharLiteral(domainCode)};{Environment.NewLine}" +
+            $"DECLARE @ControlTypeCode NVARCHAR(50) = {ToSqlNVarCharLiteral(controlTypeCode)};{Environment.NewLine}" +
+            $"DECLARE @ControlCode NVARCHAR(100) = {ToSqlNVarCharLiteral(controlCode)};{Environment.NewLine}{Environment.NewLine}" +
+            $"/* Name: {displayName} */{Environment.NewLine}" +
+            $"/* Description: {description ?? string.Empty} */{Environment.NewLine}" +
+            $"/* Objective: {controlObjective ?? string.Empty} */{Environment.NewLine}" +
+            $"/* Evidence: {evidenceExpectation ?? string.Empty} */";
+    }
+
+    private static string ToSqlNVarCharLiteral(string? value)
+    {
+        if (value is null)
+        {
+            return "NULL";
+        }
+
+        return $"N'{value.Replace("'", "''")}'";
     }
 
     private sealed record ControlTypeOption(string DisplayName, string Code, string Description);

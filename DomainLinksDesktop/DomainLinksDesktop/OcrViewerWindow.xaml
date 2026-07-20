@@ -38,11 +38,24 @@
                     <TextBlock Margin="0,4,0,0"
                                Foreground="#D7E2EA"
                                FontSize="12"
-                               Text="Standalone DeepSeek OCR tool for local PDFs and images. This viewer does not import documents into DomainLinks." />
+                               Text="Standalone local OCR tool for PDFs and images. This viewer does not import documents into DomainLinks." />
                 </StackPanel>
                 <StackPanel Grid.Column="1"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
+                    <StackPanel Margin="0,0,12,0"
+                                VerticalAlignment="Center">
+                        <TextBlock Foreground="#D7E2EA"
+                                   FontSize="11"
+                                   Text="OCR Model" />
+                        <ComboBox x:Name="OcrModelComboBox"
+                                  Width="180"
+                                  Margin="0,4,0,0"
+                                  IsEditable="True"
+                                  IsTextSearchEnabled="False"
+                                  SelectionChanged="OcrModelComboBox_OnSelectionChanged"
+                                  LostKeyboardFocus="OcrModelComboBox_OnLostKeyboardFocus" />
+                    </StackPanel>
                     <Button x:Name="OpenFileButton"
                             Width="92"
                             Margin="0,0,8,0"

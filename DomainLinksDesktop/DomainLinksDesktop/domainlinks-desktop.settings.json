@@ -1,10 +1,13 @@
 {
   "BackendBaseUrl": "http://127.0.0.1:5056",
   "OllamaBaseUrl": "http://10.211.55.2:11434",
+  "OcrModel": "glm-ocr:bf16",
   "AutoStartLocalBackend": true,
   "BackendRelativeWorkingDirectory": "DomainLinksBackend",
   "BackendPythonExecutable": ".venv\\Scripts\\python.exe",
   "BackendStartupArguments": "-m uvicorn app.main:app --reload --host 127.0.0.1 --port 5056",
+  "AutoStartSemanticEmbeddingWorker": true,
+  "SemanticEmbeddingWorkerArguments": "-m app.semantic_worker --poll-seconds 15 --batch-size 16",
   "BackendFallbackUrls": [
     "http://127.0.0.1:5056",
     "http://localhost:5056",

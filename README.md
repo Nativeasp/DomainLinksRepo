@@ -9,17 +9,22 @@ DomainLinks is a local-first AI knowledge and project-memory workspace. It is be
 - `planning/` - PRD, SQL migration plan, and DDL notes.
 - `DomainLinksAI/` - legacy VB WinForms reference app, intentionally excluded from the new root repo.
 
+## Technology Stack
+
+DomainLinks currently uses a .NET 10 WPF desktop client, a Python 3.11+ FastAPI backend, SQL Server 2025 with native vector storage, and Ollama-hosted local AI models. A separate background worker incrementally embeds documents and structured governance knowledge. Chat history is stored locally as JSON with an optional encrypted SQL-backed backup flow. WebView2 supplies embedded HTML presentation surfaces.
+
+See [Docs/current-tech-stack.md](Docs/current-tech-stack.md) for the architecture diagram, database responsibilities, AI model inventory, component boundaries, current development endpoints, and roadmap technologies.
+
 ## Direction
 
 - SQL Server is the long-term source of truth for domains, project memory, documents, content units, embeddings, and retrieval.
 - Projects act as short-term memory scopes.
 - Durable domains hold longer-lived organizational knowledge.
-- Chroma is only a legacy migration bridge, not the target storage model.
 - Ollama is the default provider today; LM Studio remains a future explicit option.
 
 ## Current Status
 
-The desktop project is scaffolded. The backend folder contains a minimal FastAPI skeleton ready for SQL Server and provider integration.
+The desktop and backend implement chat, domain and document management, SQL Server vector retrieval, local model integration, controls, policies, OCR tooling, and local chat backup/restore. Development is active and the current configuration remains local-first and Windows-hosted.
 
 ## Database Connection Config
 

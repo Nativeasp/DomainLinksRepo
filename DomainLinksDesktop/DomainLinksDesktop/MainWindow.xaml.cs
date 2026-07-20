@@ -376,6 +376,9 @@ public partial class MainWindow : Window
             case "open-domain-store":
                 OpenDomainStore();
                 break;
+            case "open-brain":
+                OpenBrain();
+                break;
             case "focus-prompt":
                 PromptTextBox.Focus();
                 PromptTextBox.SelectAll();
@@ -467,6 +470,16 @@ public partial class MainWindow : Window
         {
             ShowEmptyResponseState($"Could not open controls report.{Environment.NewLine}{ex.Message}");
         }
+    }
+
+    private void OpenBrain()
+    {
+        var window = new DomainLinksBrainWindow
+        {
+            Owner = this,
+        };
+        window.Show();
+        window.Activate();
     }
 
     private void OpenPolicyDraftInBrowser()

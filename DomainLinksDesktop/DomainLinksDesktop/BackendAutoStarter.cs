@@ -21,6 +21,7 @@ internal static class BackendAutoStarter
 
         if (await IsHealthEndpointAvailableAsync(backendUri, cancellationToken))
         {
+            TryStartSemanticEmbeddingWorker(settings);
             return;
         }
 
@@ -48,6 +49,34 @@ internal static class BackendAutoStarter
 
         Process.Start(startInfo);
         await WaitForHealthEndpointAsync(backendUri, TimeSpan.FromSeconds(10), cancellationToken);
+        TryStartSemanticEmbeddingWorker(settings);
+    }
+
+    private static void TryStartSemanticEmbeddingWorker(DomainLinksDesktopSettings settings)
+    {
+        if (!settings.AutoStartSemanticEmbeddingWorker)
+        {
+            return;
+        }
+        var backendWorkingDirectory = TryResolveBackendWorkingDirectory(settings.BackendRelativeWorkingDirectory);
+        if (backendWorkingDirectory is null)
+        {
+            return;
+        }
+        var pythonExecutable = ResolvePythonExecutable(backendWorkingDirectory, settings.BackendPythonExecutable);
+        if (pythonExecutable is null)
+        {
+            return;
+        }
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = pythonExecutable,
+            Arguments = settings.SemanticEmbeddingWorkerArguments,
+            WorkingDirectory = backendWorkingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+        });
     }
 
     private static async Task<bool> IsHealthEndpointAvailableAsync(Uri backendUri, CancellationToken cancellationToken)

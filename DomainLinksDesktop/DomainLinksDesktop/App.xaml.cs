@@ -9,6 +9,17 @@ namespace DomainLinksDesktop
     /// </summary>
     public partial class App : Application
     {
+        protected override void OnStartup(StartupEventArgs e)
+        {
+            base.OnStartup(e);
+
+            Window window = e.Args.Any(argument =>
+                string.Equals(argument, "--brain", StringComparison.OrdinalIgnoreCase))
+                ? new DomainLinksBrainWindow()
+                : new MainWindow();
+            MainWindow = window;
+            window.Show();
+        }
     }
 
 }

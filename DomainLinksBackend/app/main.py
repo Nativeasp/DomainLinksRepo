@@ -17,8 +17,10 @@ import base64
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from .config import get_settings
+from .brain import build_brain_graph, expand_document
 from .db import ping_database
 from .document_ingest import extract_pdf_text
+from .semantic_worker import get_semantic_embedding_status, queue_semantic_embeddings
 from .repositories import (
     archive_document,
     clear_policy_tables,
@@ -68,6 +70,7 @@ from .repositories import (
     upsert_app_user,
     upsert_user_chat_backup_file,
     update_collection,
+    update_control,
     update_domain,
     upsert_policy_control_explanation,
 )
@@ -1171,6 +1174,8 @@ class ControlSuggestionRequest(BaseModel):
     mode: str = "options"
     idea: str | None = None
     controlTypeCode: str | None = None
+    sequenceContext: str | None = None
+    sequenceStepLabel: str | None = None
     count: int = 5
     model: str | None = None
 
@@ -1183,6 +1188,14 @@ class ExecuteControlSuggestionRequest(BaseModel):
     controlObjective: str | None = None
     evidenceExpectation: str | None = None
     controlCode: str | None = None
+
+
+class UpdateControlRequest(BaseModel):
+    controlTypeCode: str
+    displayName: str
+    description: str | None = None
+    controlObjective: str | None = None
+    evidenceExpectation: str | None = None
 
 
 class PromptPreviewResponse(BaseModel):
@@ -1771,6 +1784,16 @@ def _build_control_suggestion_prompt(
         if request.idea and request.idea.strip()
         else "User idea/focus:\nNone. Suggest useful options from the branch context.\n\n"
     )
+    sequence_instruction = (
+        f"Sequence step:\n{request.sequenceStepLabel.strip()}\n\n"
+        if request.sequenceStepLabel and request.sequenceStepLabel.strip()
+        else ""
+    )
+    sequence_context_instruction = (
+        f"Already created in this auto-sequence:\n{request.sequenceContext.strip()}\n\n"
+        if request.sequenceContext and request.sequenceContext.strip()
+        else ""
+    )
 
     system_prompt = (
         "Use the selected domain or subdomain as the starting point for control creation. "
@@ -1794,6 +1817,7 @@ def _build_control_suggestion_prompt(
         "- Return only JSON. Do not wrap JSON in markdown fences.\n"
         "- Suggest practical, auditable controls that fit the selected domain.\n"
         "- Do not duplicate existing controls.\n"
+        "- If prior controls are supplied, keep the new control aligned in tone, orientation, and scope while still adding a distinct purpose.\n"
         '- domainCode must exactly equal the selected root domain code shown in "Branch root".\n'
         "- controlTypeCode must be one of the allowed control type codes.\n"
         "- Keep displayName concise and business-readable.\n"
@@ -1805,6 +1829,8 @@ def _build_control_suggestion_prompt(
         f"Suggestion count: {count}\n"
         f"{type_instruction}\n\n"
         f"{idea_instruction}"
+        f"{sequence_instruction}"
+        f"{sequence_context_instruction}"
         f"Allowed control types:\n{chr(10).join(allowed_type_lines) if allowed_type_lines else 'None'}\n\n"
         f"Branch domains:\n{chr(10).join(domain_lines) if domain_lines else 'None'}\n\n"
         f"Existing controls:\n{chr(10).join(control_lines) if control_lines else 'None'}\n\n"
@@ -3585,6 +3611,44 @@ def create_app() -> FastAPI:
     def domains() -> list[dict[str, object]]:
         return list_domains(settings)
 
+    @app.get("/brain/graph")
+    def brain_graph(
+        scopeKind: str = "domain",
+        scopeId: str = "information-management",
+        includeDescendants: bool = True,
+        maxNodes: int = 2000,
+    ) -> dict[str, object]:
+        try:
+            return build_brain_graph(
+                settings,
+                scope_kind=scopeKind,
+                scope_id=scopeId,
+                include_descendants=includeDescendants,
+                max_nodes=maxNodes,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/brain/documents/{documentId}/content-units")
+    def brain_document_content_units(documentId: str) -> dict[str, object]:
+        try:
+            return expand_document(settings, documentId)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/semantic-embeddings/status")
+    def semantic_embeddings_status() -> dict[str, object]:
+        return get_semantic_embedding_status(settings)
+
+    @app.post("/semantic-embeddings/queue")
+    def semantic_embeddings_queue(mode: str = "pending") -> dict[str, object]:
+        try:
+            return queue_semantic_embeddings(settings, mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/domain-types")
     def domain_types() -> list[dict[str, object]]:
         return list_domain_types(settings)
@@ -4122,6 +4186,23 @@ def create_app() -> FastAPI:
                     control_objective=request.controlObjective,
                     evidence_expectation=request.evidenceExpectation,
                 ),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/controls/{controlId}")
+    def edit_control(controlId: str, request: UpdateControlRequest) -> dict[str, object]:
+        try:
+            return {
+                "updatedControl": update_control(
+                    settings,
+                    control_id=controlId,
+                    control_type_code=request.controlTypeCode,
+                    display_name=request.displayName,
+                    description=request.description,
+                    control_objective=request.controlObjective,
+                    evidence_expectation=request.evidenceExpectation,
+                )
             }
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

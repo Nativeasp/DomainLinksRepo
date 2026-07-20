@@ -209,6 +209,12 @@
                                         Grid.ColumnSpan="3"
                                         Orientation="Horizontal"
                                         HorizontalAlignment="Right">
+                                <Button x:Name="AutoCreateControlsButton"
+                                        Width="124"
+                                        Height="30"
+                                        Margin="0,0,8,0"
+                                        Click="AutoCreateControlsButton_OnClick"
+                                        Content="Auto Create 18" />
                                 <Button x:Name="PromptPreviewButton"
                                         Width="110"
                                         Height="30"
@@ -251,23 +257,144 @@
                         <RowDefinition Height="8" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <TextBlock FontWeight="SemiBold"
-                               Foreground="#263746"
-                               FontSize="12"
-                               Text="Detail" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock FontWeight="SemiBold"
+                                   Foreground="#263746"
+                                   FontSize="12"
+                                   Text="Detail" />
+                        <Button Grid.Column="1"
+                                x:Name="EditDetailButton"
+                                Width="78"
+                                Height="28"
+                                Click="EditDetailButton_OnClick"
+                                IsEnabled="False"
+                                Content="✎" />
+                    </Grid>
                     <Border Grid.Row="2"
                             Margin="0,0,0,2"
                             Background="#F8F6F1"
                             BorderBrush="#E2DBCF"
                             BorderThickness="1"
                             SnapsToDevicePixels="True">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled"
-                                      Padding="8">
-                            <TextBlock x:Name="DraftDetailTextBlock"
-                                       TextWrapping="Wrap"
-                                       Foreground="#000000" />
-                        </ScrollViewer>
+                        <Grid>
+                            <ScrollViewer x:Name="DetailViewScrollViewer"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          Padding="8">
+                                <TextBlock x:Name="DraftDetailTextBlock"
+                                           TextWrapping="Wrap"
+                                           Foreground="#000000" />
+                            </ScrollViewer>
+                            <ScrollViewer x:Name="DetailEditScrollViewer"
+                                          Visibility="Collapsed"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          Padding="8">
+                                <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="6" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="6" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="6" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="6" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="6" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="6" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel>
+                                    <TextBlock x:Name="DetailModeTextBlock"
+                                               Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Select a control or suggestion." />
+                                    <TextBlock x:Name="DetailMetaTextBlock"
+                                               Margin="0,2,0,0"
+                                               Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="2">
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Name" />
+                                    <TextBox x:Name="DetailNameTextBox"
+                                             Margin="0,3,0,0"
+                                             Padding="7,5" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="4">
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Type" />
+                                    <ComboBox x:Name="DetailControlTypeComboBox"
+                                              Margin="0,3,0,0"
+                                              Height="30"
+                                              DisplayMemberPath="DisplayName"
+                                              SelectedValuePath="Code" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="6">
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Code" />
+                                    <TextBox x:Name="DetailCodeTextBox"
+                                             Margin="0,3,0,0"
+                                             IsReadOnly="True"
+                                             Background="#F0ECE4"
+                                             Padding="7,5" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="8">
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Description" />
+                                    <TextBox x:Name="DetailDescriptionTextBox"
+                                             Margin="0,3,0,0"
+                                             MinHeight="72"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Padding="7,5" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="10">
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Objective" />
+                                    <TextBox x:Name="DetailObjectiveTextBox"
+                                             Margin="0,3,0,0"
+                                             MinHeight="72"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Padding="7,5" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="12">
+                                    <TextBlock Foreground="#5B6770"
+                                               FontSize="11"
+                                               Text="Evidence" />
+                                    <TextBox x:Name="DetailEvidenceTextBox"
+                                             Margin="0,3,0,0"
+                                             MinHeight="72"
+                                             AcceptsReturn="True"
+                                             TextWrapping="Wrap"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Padding="7,5" />
+                                </StackPanel>
+                                </Grid>
+                            </ScrollViewer>
+                        </Grid>
                     </Border>
                     <StackPanel Grid.Row="4"
                                 Orientation="Horizontal"

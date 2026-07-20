@@ -158,6 +158,12 @@
                             Orientation="Horizontal"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Top">
+                    <Button x:Name="OpenBrainButton"
+                            Width="118"
+                            Height="32"
+                            Margin="0,0,10,0"
+                            Click="OpenBrainButton_OnClick"
+                            Content="Open in Brain" />
                     <Button x:Name="RefreshButton"
                             Width="88"
                             Height="32"

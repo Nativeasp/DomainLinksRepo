@@ -5,12 +5,17 @@ namespace DomainLinksDesktop;
 
 internal sealed record DomainLinksDesktopSettings
 {
+    public const string DefaultOcrModel = "glm-ocr:bf16";
+
     public string BackendBaseUrl { get; init; } = "http://127.0.0.1:5056";
     public string OllamaBaseUrl { get; init; } = "http://10.211.55.2:11434";
+    public string OcrModel { get; init; } = DefaultOcrModel;
     public bool AutoStartLocalBackend { get; init; } = true;
     public string BackendRelativeWorkingDirectory { get; init; } = "DomainLinksBackend";
     public string BackendPythonExecutable { get; init; } = ".venv\\Scripts\\python.exe";
     public string BackendStartupArguments { get; init; } = "-m uvicorn app.main:app --reload --host 127.0.0.1 --port 5056";
+    public bool AutoStartSemanticEmbeddingWorker { get; init; } = true;
+    public string SemanticEmbeddingWorkerArguments { get; init; } = "-m app.semantic_worker --poll-seconds 15 --batch-size 16";
     public string[] BackendFallbackUrls { get; init; } =
     [
         "http://127.0.0.1:5056",
@@ -85,10 +90,13 @@ internal sealed record DomainLinksDesktopSettings
             {
                 BackendBaseUrl = NormalizeUrl(settings.BackendBaseUrl, "http://127.0.0.1:5056"),
                 OllamaBaseUrl = NormalizeUrl(settings.OllamaBaseUrl, "http://10.211.55.2:11434"),
+                OcrModel = NormalizeText(settings.OcrModel, DefaultOcrModel),
                 AutoStartLocalBackend = settings.AutoStartLocalBackend,
                 BackendRelativeWorkingDirectory = NormalizePath(settings.BackendRelativeWorkingDirectory, "DomainLinksBackend"),
                 BackendPythonExecutable = NormalizePath(settings.BackendPythonExecutable, ".venv\\Scripts\\python.exe"),
                 BackendStartupArguments = NormalizeText(settings.BackendStartupArguments, "-m uvicorn app.main:app --reload --host 127.0.0.1 --port 5056"),
+                AutoStartSemanticEmbeddingWorker = settings.AutoStartSemanticEmbeddingWorker,
+                SemanticEmbeddingWorkerArguments = NormalizeText(settings.SemanticEmbeddingWorkerArguments, "-m app.semantic_worker --poll-seconds 15 --batch-size 16"),
                 BackendFallbackUrls = NormalizeUrls(settings.BackendFallbackUrls, DefaultBackendFallbackUrls()),
                 OllamaFallbackUrls = NormalizeUrls(settings.OllamaFallbackUrls, DefaultOllamaFallbackUrls()),
                 WindowWidth = settings.WindowWidth > 0 ? settings.WindowWidth : 1420,
@@ -154,6 +162,7 @@ internal sealed record DomainLinksDesktopSettings
             WindowHeight = PositiveOrDefault(WindowHeight, 820),
             WindowLeft = FiniteOrDefault(WindowLeft, 0),
             WindowTop = FiniteOrDefault(WindowTop, 0),
+            OcrModel = NormalizeText(OcrModel, DefaultOcrModel),
             LeftPaneWidth = PositiveOrDefault(LeftPaneWidth, 280),
             RightPaneWidth = PositiveOrDefault(RightPaneWidth, 320),
             PromptPaneHeight = PositiveOrDefault(PromptPaneHeight, 160),

@@ -27,6 +27,19 @@ public partial class DomainPolicyWorkspaceTab : UserControl
 
     public ObservableCollection<PolicyListItem> Policies { get; } = [];
     public ObservableCollection<SelectableControlItem> SelectableControls { get; } = [];
+
+    internal BrainLaunchContext? GetBrainLaunchContext()
+    {
+        if (PoliciesDataGrid.SelectedItem is PolicyListItem policy)
+        {
+            return new BrainLaunchContext(BrainScopeKind.Policy, policy.PolicyId, policy.PolicyTitle,
+                FocusNodeId: $"policy:{policy.PolicyId}");
+        }
+        return _selectedDomain is null
+            ? null
+            : new BrainLaunchContext(BrainScopeKind.Domain, _selectedDomain.DomainCode, _selectedDomain.DisplayName,
+                FocusNodeId: $"domain:{_selectedDomain.DomainId}");
+    }
     public ObservableCollection<ControlGroupingModeItem> ControlGroupingModes { get; } =
     [
         new ControlGroupingModeItem { Code = "ai", DisplayName = "AI Grouping" },

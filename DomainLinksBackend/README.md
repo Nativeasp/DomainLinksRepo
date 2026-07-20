@@ -6,9 +6,9 @@ Windows-hosted Python backend for DomainLinks.
 
 - SQL Server access and schema-backed repositories.
 - SQL Server vector retrieval.
+- Background semantic embedding for domains, controls, policies, and policy statements.
 - Ollama provider integration.
 - Future LM Studio provider integration.
-- Legacy Chroma import and validation tooling.
 - Streaming prompt responses for the desktop client.
 
 ## Development
@@ -40,6 +40,14 @@ Health check:
 ```text
 http://127.0.0.1:5056/health
 ```
+
+Run the semantic embedding worker continuously:
+
+```powershell
+python -m app.semantic_worker --poll-seconds 15 --batch-size 16
+```
+
+Use `--once` for a one-time synchronization and backfill. The desktop starts the continuous worker automatically by default; SQL application locking prevents duplicate active workers.
 
 Config check:
 
