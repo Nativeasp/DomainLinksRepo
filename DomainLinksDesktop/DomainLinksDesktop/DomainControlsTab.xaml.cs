@@ -8,7 +8,6 @@ namespace DomainLinksDesktop;
 
 public partial class DomainControlsTab : UserControl
 {
-    private const string ControlSuggestionModelName = "qwen3.5:35b-mlx";
     private static readonly string[] AutoControlTypeOrder = ["DIRECTIVE", "PREVENTIVE", "DETERRENT", "DETECTIVE", "CORRECTIVE", "COMPENSATING"];
     private readonly ObservableCollection<ControlTypeOption> _controlTypeOptions = [];
     private DomainLinksDesktopSettings? _settings;
@@ -440,7 +439,7 @@ public partial class DomainControlsTab : UserControl
 
             var preview = await response.Content.ReadFromJsonAsync<PromptPreviewResponse>();
             var body = $"SYSTEM PROMPT{Environment.NewLine}{preview?.SystemPrompt ?? string.Empty}{Environment.NewLine}{Environment.NewLine}USER PROMPT{Environment.NewLine}{preview?.UserPrompt ?? string.Empty}";
-            ShowReadOnlyTextWindow("Control Prompt Preview", preview?.Model ?? ControlSuggestionModelName, body);
+            ShowReadOnlyTextWindow("Control Prompt Preview", preview?.Model ?? ResolveContentGenerationModel(), body);
         }
         catch (Exception ex)
         {
@@ -567,7 +566,7 @@ public partial class DomainControlsTab : UserControl
             idea,
             controlTypeCode = string.IsNullOrWhiteSpace(controlTypeCode) ? null : controlTypeCode,
             count,
-            model = ControlSuggestionModelName,
+            model = ResolveContentGenerationModel(),
         };
     }
 
@@ -615,7 +614,7 @@ public partial class DomainControlsTab : UserControl
                 idea = string.IsNullOrWhiteSpace(focus) ? null : focus,
                 controlTypeCode,
                 count = 1,
-                model = ControlSuggestionModelName,
+                model = ResolveContentGenerationModel(),
                 sequenceStepLabel = $"{controlTypeCode} control {ordinalWithinType} of 3",
                 sequenceContext = BuildAutoSequenceContext(createdControls),
             });
@@ -978,6 +977,13 @@ public partial class DomainControlsTab : UserControl
     {
         var normalized = (value ?? string.Empty).Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private string ResolveContentGenerationModel()
+    {
+        return string.IsNullOrWhiteSpace(_settings?.ContentGenerationModel)
+            ? DomainLinksDesktopSettings.DefaultContentGenerationModel
+            : _settings.ContentGenerationModel.Trim();
     }
 
     private static string BuildControlInsertPreview(

@@ -49,14 +49,15 @@ Projects should be represented in SQL Server through a domain/scope type such as
 
 ### Collection
 
-A collection is a retrievable corpus inside a domain or project. Internally, collections should use stable GUID/code identifiers. Friendly names and slugs should be mutable UI fields.
+A collection is a retrievable corpus inside a domain or project. Internally, collections use SQL Server integer identity keys plus stable unique collection codes. Friendly names and slugs are mutable UI fields.
 
 Example display names:
 - `Hiring Policy`
 - `Hire request new DBA`
 
 Example internal identity:
-- `CollectionCode = 6F6C7D1E-...`
+- `CollectionId = 42`
+- `CollectionCode = hiring-policy`
 
 ### Document
 

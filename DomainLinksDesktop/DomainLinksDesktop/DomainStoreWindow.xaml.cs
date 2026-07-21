@@ -16,7 +16,6 @@ namespace DomainLinksDesktop;
 
 public partial class DomainStoreWindow : Window
 {
-    private const string DomainAssistModelName = "qwen3.5:35b-mlx";
     private readonly DomainLinksDesktopSettings _settings;
     private readonly HttpClient _httpClient;
     private readonly ObservableCollection<DomainItem> _sharedRootDomains = [];
@@ -1516,7 +1515,7 @@ public partial class DomainStoreWindow : Window
                     domainCode = targetDomain.DomainCode,
                     instruction,
                     draftText = DomainDescriptionTextBox.Text,
-                    model = DomainAssistModelName,
+                    model = _settings.ContentGenerationModel,
                 },
                 "Domain Assist Prompt Preview");
 
@@ -1527,7 +1526,7 @@ public partial class DomainStoreWindow : Window
                     domainCode = targetDomain.DomainCode,
                     instruction,
                     draftText = DomainDescriptionTextBox.Text,
-                    model = DomainAssistModelName,
+                    model = _settings.ContentGenerationModel,
                 });
             response.EnsureSuccessStatusCode();
 
@@ -1589,7 +1588,7 @@ public partial class DomainStoreWindow : Window
                     targetDomainType = targetTypeGroup?.DomainType,
                     instruction,
                     draftText = DomainDescriptionTextBox.Text,
-                    model = DomainAssistModelName,
+                    model = _settings.ContentGenerationModel,
                 },
                 "Suggest Child Prompt Preview");
 
@@ -1601,7 +1600,7 @@ public partial class DomainStoreWindow : Window
                     targetDomainType = targetTypeGroup?.DomainType,
                     instruction,
                     draftText = DomainDescriptionTextBox.Text,
-                    model = DomainAssistModelName,
+                    model = _settings.ContentGenerationModel,
                 });
             response.EnsureSuccessStatusCode();
 

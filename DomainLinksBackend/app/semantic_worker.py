@@ -32,6 +32,20 @@ SOURCE_QUERIES: tuple[tuple[str, str], ...] = (
         CONCAT('Control: ',DisplayName,CHAR(10),'Code: ',ControlCode,CHAR(10),'Description: ',COALESCE(Description,''),
         CHAR(10),'Objective: ',COALESCE(ControlObjective,''),CHAR(10),'Evidence: ',COALESCE(EvidenceExpectation,'')) CanonicalText
         FROM dbo.Controls WHERE Status IN ('Draft','Active')"""),
+    ("Principle", """SELECT PrincipleId SourceId,OriginDomainId ParentId,Name DisplayName,
+        CONCAT('Principle: ',Name,CHAR(10),'Code: ',PrincipleCode,CHAR(10),'Statement: ',StatementText,
+        CHAR(10),'Working expression: ',COALESCE(ShortStatementText,''),CHAR(10),'Rationale: ',COALESCE(RationaleText,'')) CanonicalText
+        FROM dbo.Principles WHERE LifecycleStatus='Active'"""),
+    ("FrameworkElement", """SELECT e.FrameworkElementId SourceId,e.FrameworkVersionId ParentId,e.ElementName DisplayName,
+        CONCAT('Framework: ',f.FrameworkName,' v',fv.VersionText,CHAR(10),'Element: ',e.ElementName,
+        CHAR(10),'Code: ',e.ElementCode,CHAR(10),'Type: ',e.ElementType,
+        CHAR(10),'Statement: ',COALESCE(e.StatementText,''),CHAR(10),'Definition: ',COALESCE(e.DefinitionText,''),
+        CHAR(10),'Principles: ',COALESCE((SELECT STRING_AGG(CONVERT(nvarchar(max),p.StatementText),CHAR(10))
+            FROM dbo.FrameworkPrincipleLinks fpl JOIN dbo.Principles p ON p.PrincipleId=fpl.PrincipleId
+            WHERE fpl.FrameworkElementId=e.FrameworkElementId),'')) CanonicalText
+        FROM dbo.FrameworkElements e JOIN dbo.FrameworkVersions fv ON fv.FrameworkVersionId=e.FrameworkVersionId
+        JOIN dbo.Frameworks f ON f.FrameworkId=fv.FrameworkId
+        WHERE fv.VersionStatus='Published' AND f.LifecycleStatus='Active'"""),
     ("Policy", """SELECT PolicyId SourceId,RootDomainId ParentId,PolicyTitle DisplayName,
         CONCAT('Policy: ',PolicyTitle,CHAR(10),'Code: ',PolicyCode,CHAR(10),'Version: ',COALESCE(VersionText,''),CHAR(10),'Status: ',Status) CanonicalText
         FROM dbo.Policies"""),

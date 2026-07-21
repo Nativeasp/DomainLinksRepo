@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 import re
 
 from .config import Settings
-from .db import fetch_all, fetch_one, get_connection
+from .db import fetch_all, fetch_one, get_connection, normalize_database_record
 
 
 _CONTROL_TYPE_SORT_ORDER = {
@@ -3684,10 +3683,7 @@ def upsert_policy_draft(
 
 
 def _normalize_row(row: dict[str, object]) -> dict[str, object]:
-    normalized: dict[str, object] = {}
-    for key, value in row.items():
-        normalized[key] = str(value) if hasattr(value, "hex") and not isinstance(value, (bytes, bytearray, memoryview)) else value
-    return normalized
+    return normalize_database_record(row)
 
 
 def _ensure_policy_control_explanations_table(cursor) -> None:
@@ -3696,10 +3692,9 @@ def _ensure_policy_control_explanations_table(cursor) -> None:
         IF OBJECT_ID('dbo.PolicyControlExplanations', 'U') IS NULL
         BEGIN
             CREATE TABLE dbo.PolicyControlExplanations (
-                PolicyControlExplanationId UNIQUEIDENTIFIER NOT NULL
-                    CONSTRAINT DF_PolicyControlExplanations_Id DEFAULT (NEWSEQUENTIALID()),
-                PolicyId UNIQUEIDENTIFIER NOT NULL,
-                ControlId UNIQUEIDENTIFIER NOT NULL,
+                PolicyControlExplanationId INT IDENTITY(1, 1) NOT NULL,
+                PolicyId INT NOT NULL,
+                ControlId INT NOT NULL,
                 ExplanationText NVARCHAR(MAX) NOT NULL,
                 SourceModelName NVARCHAR(200) NULL,
                 CreatedAtUtc DATETIME2(0) NOT NULL
@@ -3707,7 +3702,11 @@ def _ensure_policy_control_explanations_table(cursor) -> None:
                 UpdatedAtUtc DATETIME2(0) NOT NULL
                     CONSTRAINT DF_PolicyControlExplanations_UpdatedAt DEFAULT (SYSUTCDATETIME()),
                 CONSTRAINT PK_PolicyControlExplanations PRIMARY KEY (PolicyControlExplanationId),
-                CONSTRAINT UQ_PolicyControlExplanations_Policy_Control UNIQUE (PolicyId, ControlId)
+                CONSTRAINT UQ_PolicyControlExplanations_Policy_Control UNIQUE (PolicyId, ControlId),
+                CONSTRAINT FK_PolicyControlExplanations_Policies
+                    FOREIGN KEY (PolicyId) REFERENCES dbo.Policies(PolicyId),
+                CONSTRAINT FK_PolicyControlExplanations_Controls
+                    FOREIGN KEY (ControlId) REFERENCES dbo.Controls(ControlId)
             );
 
             CREATE INDEX IX_PolicyControlExplanations_PolicyId

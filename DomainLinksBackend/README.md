@@ -69,3 +69,11 @@ Apply it with `sqlcmd`:
 sqlcmd -S RICHARDBASQB378 -E -C -d DomainLinks -i DomainLinksBackend\migrations\001_initial_schema.sql
 sqlcmd -S RICHARDBASQB378 -E -C -d DomainLinks -i DomainLinksBackend\migrations\002_seed_initial_scopes.sql
 ```
+
+Migration 035 is an operational table-rebuild migration. Run its guarded utility against a restored validation database before production cutover:
+
+```powershell
+python scripts\convert_guid_ids_to_int.py --database DomainLinks_Int_Validation --yes
+```
+
+The standard backup and ID-mapping location is `C:\SQLDatabases\Backups`.

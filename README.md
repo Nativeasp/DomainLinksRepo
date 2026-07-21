@@ -17,7 +17,7 @@ See [Docs/current-tech-stack.md](Docs/current-tech-stack.md) for the architectur
 
 ## Direction
 
-- SQL Server is the long-term source of truth for domains, project memory, documents, content units, embeddings, and retrieval.
+- SQL Server is the long-term source of truth for domains, organizational frameworks and principles, project memory, documents, content units, embeddings, and retrieval.
 - Projects act as short-term memory scopes.
 - Durable domains hold longer-lived organizational knowledge.
 - Ollama is the default provider today; LM Studio remains a future explicit option.

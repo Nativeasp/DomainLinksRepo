@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_embed_model: str = "nomic-embed-text:v1.5"
     ollama_chat_model: str = "llama3.1:8b"
+    ollama_generation_model: str = "qwen3.5:35b-mlx"
     ollama_title_model: str = "llama3.1:8b"
     lmstudio_base_url: str = "http://127.0.0.1:1234"
 
@@ -44,6 +45,7 @@ class Settings(BaseSettings):
             "ollama_base_url": self.ollama_base_url,
             "ollama_embed_model": self.ollama_embed_model,
             "ollama_chat_model": self.ollama_chat_model,
+            "ollama_generation_model": self.ollama_generation_model,
             "ollama_title_model": self.ollama_title_model,
             "lmstudio_base_url": self.lmstudio_base_url,
         }

@@ -13,6 +13,80 @@ else:
     PYODBC_IMPORT_ERROR = None
 
 
+# Database entity IDs remain JSON strings at the API boundary. This preserves the
+# desktop contract while SQL Server stores the values as INT/IDENTITY keys.
+STRING_DATABASE_ID_FIELDS = frozenset(
+    {
+        "AdoptedFromPrincipleId",
+        "AncestorDomainId",
+        "BasedOnVersionId",
+        "CollectionId",
+        "ContentUnitEmbeddingId",
+        "ContentUnitId",
+        "ControlId",
+        "DescendantDomainId",
+        "DocumentId",
+        "DomainControlId",
+        "DomainId",
+        "DomainParentId",
+        "EmbeddingProfileId",
+        "FocusId",
+        "FrameworkArtifactLinkId",
+        "FrameworkContextRuleId",
+        "FrameworkElementId",
+        "FrameworkElementRelationId",
+        "FrameworkId",
+        "FrameworkPrincipleLinkId",
+        "FrameworkVersionId",
+        "FromElementId",
+        "FromPrincipleId",
+        "OriginDomainId",
+        "OriginPrincipleId",
+        "ParentElementId",
+        "PolicyAccountabilityStatementId",
+        "PolicyConsequenceId",
+        "PolicyControlExplanationId",
+        "PolicyControlStatementId",
+        "PolicyId",
+        "PolicyObjectiveId",
+        "PolicyPrincipleId",
+        "PolicyPrincipleLinkId",
+        "PolicySectionId",
+        "PolicyStrategyStatementId",
+        "PolicyTemplateId",
+        "PolicyTransparencyStatementId",
+        "PrincipleId",
+        "PrincipleRelationId",
+        "ProviderSettingId",
+        "RetrievalProfileId",
+        "RootDomainId",
+        "SemanticArtifactEmbeddingId",
+        "SemanticArtifactId",
+        "SourceDocumentId",
+        "SourceDomainId",
+        "SourceParentId",
+        "SourceRecordId",
+        "TargetDocumentId",
+        "ToElementId",
+        "ToPrincipleId",
+    }
+)
+
+
+def normalize_database_record(row: Mapping[str, object]) -> dict[str, object]:
+    normalized: dict[str, object] = {}
+    for key, value in row.items():
+        is_uuid_like = (
+            hasattr(value, "hex")
+            and not isinstance(value, (bytes, bytearray, memoryview))
+        )
+        if value is not None and (key in STRING_DATABASE_ID_FIELDS or is_uuid_like):
+            normalized[key] = str(value)
+        else:
+            normalized[key] = value
+    return normalized
+
+
 def build_connection_string(settings: Settings) -> str:
     parts = [
         f"DRIVER={{{settings.sql_driver}}}",
@@ -43,7 +117,7 @@ def fetch_all(
         cursor.execute(query, params or [])
         columns = [column[0] for column in cursor.description]
         rows = cursor.fetchall()
-        return [dict(zip(columns, row, strict=False)) for row in rows]
+        return [normalize_database_record(dict(zip(columns, row, strict=False))) for row in rows]
 
 
 def fetch_one(
@@ -59,7 +133,7 @@ def fetch_one(
             return None
 
         columns = [column[0] for column in cursor.description]
-        return dict(zip(columns, row, strict=False))
+        return normalize_database_record(dict(zip(columns, row, strict=False)))
 
 
 def ping_database(settings: Settings) -> Mapping[str, object]:

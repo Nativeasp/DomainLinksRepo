@@ -20,6 +20,12 @@ from .config import get_settings
 from .brain import build_brain_graph, expand_document
 from .db import ping_database
 from .document_ingest import extract_pdf_text
+from .frameworks import (
+    format_framework_context,
+    get_framework,
+    list_frameworks,
+    resolve_framework_context,
+)
 from .semantic_worker import get_semantic_embedding_status, queue_semantic_embeddings
 from .repositories import (
     archive_document,
@@ -43,7 +49,6 @@ from .repositories import (
     list_context_units_for_collections,
     get_policy_presentation_data,
     get_retrieval_profile,
-    get_recent_context_units,
     get_domain_assist_context,
     has_user_chat_backup_files,
     list_collection_documents,
@@ -1011,7 +1016,9 @@ def _ensure_embeddings_for_content(
     }
 
 
-def _retrieve_context_for_chat(settings, request: AskRequest) -> tuple[list[dict[str, object]], dict[str, object]]:
+def _retrieve_context_for_chat(
+    settings, request: "AskRequest"
+) -> tuple[list[dict[str, object]], dict[str, object]]:
     checked_domain_collection_codes = [
         code for code in request.longTermCollectionCodes
         if str(code or "").strip()
@@ -1431,6 +1438,28 @@ def _generate_with_ollama(
             metadata=trace_metadata,
         )
         raise
+
+
+def _append_framework_context(prompt: str, framework_context: str) -> str:
+    if not framework_context.strip():
+        return prompt
+    return f"{prompt.rstrip()}\n\n{framework_context.strip()}"
+
+
+def _load_framework_prompt_context(
+    settings,
+    *,
+    activity_type: str,
+    artifact_type: str | None = None,
+    source_record_id: object | None = None,
+) -> str:
+    context = resolve_framework_context(
+        settings,
+        activity_type=activity_type,
+        artifact_type=artifact_type,
+        source_record_id=str(source_record_id) if source_record_id else None,
+    )
+    return format_framework_context(context)
 
 
 async def _stream_with_ollama(
@@ -3611,6 +3640,37 @@ def create_app() -> FastAPI:
     def domains() -> list[dict[str, object]]:
         return list_domains(settings)
 
+    @app.get("/frameworks")
+    def frameworks() -> list[dict[str, object]]:
+        return list_frameworks(settings)
+
+    @app.get("/frameworks/{frameworkCode}")
+    def framework(frameworkCode: str, version: str | None = None) -> dict[str, object]:
+        try:
+            return get_framework(settings, frameworkCode, version)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/frameworks/{frameworkCode}/context")
+    def framework_context(
+        frameworkCode: str,
+        activityType: str = "General",
+        artifactType: str | None = None,
+        sourceRecordId: str | None = None,
+        deliveryMode: str = "AIContext",
+    ) -> dict[str, object]:
+        try:
+            return resolve_framework_context(
+                settings,
+                framework_code=frameworkCode,
+                activity_type=activityType,
+                artifact_type=artifactType,
+                source_record_id=sourceRecordId,
+                delivery_mode=deliveryMode,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.get("/brain/graph")
     def brain_graph(
         scopeKind: str = "domain",
@@ -3695,7 +3755,7 @@ def create_app() -> FastAPI:
             template_file = _resolve_repo_relative_path(templatePath)
             template_text = template_file.read_text(encoding="utf-8")
             all_domains = list_domains(settings)
-            selected_model = (model or settings.ollama_chat_model).strip()
+            selected_model = (model or settings.ollama_generation_model).strip()
             report_rows = list_controls_report_rows(settings)
             domain_codes_with_controls = {
                 str(row.get("DomainCode") or "").strip()
@@ -3740,6 +3800,15 @@ def create_app() -> FastAPI:
                     branch_domains,
                     existing_controls,
                     all_domains,
+                )
+                system_prompt = _append_framework_context(
+                    system_prompt,
+                    _load_framework_prompt_context(
+                        settings,
+                        activity_type="PolicyDevelopment",
+                        artifact_type="Domain",
+                        source_record_id=root_domain.get("DomainId"),
+                    ),
                 )
                 payload = _generate_with_ollama(
                     settings,
@@ -3789,7 +3858,7 @@ def create_app() -> FastAPI:
                 ]
             root_domain = context.get("rootDomain") or {}
             branch_domains = context.get("branchDomains") or []
-            selected_model = (request.model or settings.ollama_chat_model).strip()
+            selected_model = (request.model or settings.ollama_generation_model).strip()
             system_prompt, user_prompt = _build_policy_content_prompt(
                 template_text,
                 root_domain,
@@ -3797,6 +3866,15 @@ def create_app() -> FastAPI:
                 branch_controls,
                 all_domains,
                 control_groups,
+            )
+            system_prompt = _append_framework_context(
+                system_prompt,
+                _load_framework_prompt_context(
+                    settings,
+                    activity_type="PolicyDevelopment",
+                    artifact_type="Domain",
+                    source_record_id=root_domain.get("DomainId"),
+                ),
             )
             payload = _generate_with_ollama(
                 settings,
@@ -3840,7 +3918,7 @@ def create_app() -> FastAPI:
                 ]
             root_domain = context.get("rootDomain") or {}
             branch_domains = context.get("branchDomains") or []
-            selected_model = (request.model or settings.ollama_chat_model).strip()
+            selected_model = (request.model or settings.ollama_generation_model).strip()
             prompt = _build_policy_line_retry_prompt(
                 template_text=template_text,
                 root_domain=root_domain,
@@ -3851,6 +3929,15 @@ def create_app() -> FastAPI:
                 section_key=request.sectionKey,
                 current_text=request.currentText,
                 control_code=request.controlCode,
+            )
+            prompt = _append_framework_context(
+                prompt,
+                _load_framework_prompt_context(
+                    settings,
+                    activity_type="PolicyDevelopment",
+                    artifact_type="Domain",
+                    source_record_id=root_domain.get("DomainId"),
+                ),
             )
             payload = _generate_with_ollama(
                 settings,
@@ -3940,8 +4027,17 @@ def create_app() -> FastAPI:
             if existing and not request.force:
                 return existing
 
-            selected_model = request.model or settings.ollama_chat_model
+            selected_model = request.model or settings.ollama_generation_model
             prompt = _build_policy_control_explanation_prompt(policy_data, controlCode)
+            prompt = _append_framework_context(
+                prompt,
+                _load_framework_prompt_context(
+                    settings,
+                    activity_type="PolicyDevelopment",
+                    artifact_type="Policy",
+                    source_record_id=policyId,
+                ),
+            )
             payload = _generate_with_ollama(
                 settings,
                 prompt,
@@ -3983,10 +4079,20 @@ def create_app() -> FastAPI:
             context = get_control_suggestion_context(settings, request.branchRootDomainCode)
             control_types = list_control_types(settings)
             prompt = _build_control_suggestion_prompt_text(context, control_types, request)
+            prompt = _append_framework_context(
+                prompt,
+                _load_framework_prompt_context(
+                    settings,
+                    activity_type="ControlDevelopment",
+                    artifact_type="Domain",
+                    source_record_id=(context.get("rootDomain") or {}).get("DomainId"),
+                ),
+            )
+            selected_model = request.model or settings.ollama_generation_model
             payload = _generate_with_ollama(
                 settings,
                 prompt,
-                model=request.model,
+                model=selected_model,
                 trace_label="controls.suggest",
             )
             parsed = _extract_json_object(str(payload.get("response") or ""))
@@ -4042,7 +4148,7 @@ def create_app() -> FastAPI:
 
             return {
                 "suggestions": normalized_suggestions,
-                "metrics": _extract_metrics(payload, request.model),
+                "metrics": _extract_metrics(payload, selected_model),
             }
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -4071,7 +4177,7 @@ def create_app() -> FastAPI:
                 root_domain=context.get("rootDomain") or {},
                 branch_controls=branch_controls,
             )
-            selected_model = request.model or settings.ollama_chat_model
+            selected_model = request.model or settings.ollama_generation_model
             payload = _generate_with_ollama(
                 settings,
                 prompt,
@@ -4153,8 +4259,17 @@ def create_app() -> FastAPI:
             context = get_control_suggestion_context(settings, request.branchRootDomainCode)
             control_types = list_control_types(settings)
             system_prompt, user_prompt = _build_control_suggestion_prompt(context, control_types, request)
+            system_prompt = _append_framework_context(
+                system_prompt,
+                _load_framework_prompt_context(
+                    settings,
+                    activity_type="ControlDevelopment",
+                    artifact_type="Domain",
+                    source_record_id=(context.get("rootDomain") or {}).get("DomainId"),
+                ),
+            )
             return PromptPreviewResponse(
-                model=request.model or settings.ollama_chat_model,
+                model=request.model or settings.ollama_generation_model,
                 systemPrompt=system_prompt,
                 userPrompt=user_prompt,
             )
@@ -4234,10 +4349,20 @@ def create_app() -> FastAPI:
 
         domain_context = get_domain_assist_context(settings, request.domainCode)
         compiled_prompt = _build_domain_assist_prompt(domain_context, instruction, request.draftText)
+        compiled_prompt = _append_framework_context(
+            compiled_prompt,
+            _load_framework_prompt_context(
+                settings,
+                activity_type="DomainDevelopment",
+                artifact_type="Domain",
+                source_record_id=(domain_context.get("domain") or {}).get("DomainId"),
+            ),
+        )
+        selected_model = request.model or settings.ollama_generation_model
         answer_payload = _generate_with_ollama(
             settings,
             compiled_prompt,
-            model=request.model,
+            model=selected_model,
             trace_label="domains.assist",
         )
         answer = str(answer_payload.get("response", "")).strip()
@@ -4245,7 +4370,7 @@ def create_app() -> FastAPI:
         return {
             "answer": answer,
             "systemPromptLabel": "Domain curation assist",
-            "metrics": _extract_metrics(answer_payload, model=request.model),
+            "metrics": _extract_metrics(answer_payload, model=selected_model),
         }
 
     @app.post("/domains/assist-preview")
@@ -4260,8 +4385,17 @@ def create_app() -> FastAPI:
             instruction,
             request.draftText,
         )
+        system_prompt = _append_framework_context(
+            system_prompt,
+            _load_framework_prompt_context(
+                settings,
+                activity_type="DomainDevelopment",
+                artifact_type="Domain",
+                source_record_id=(domain_context.get("domain") or {}).get("DomainId"),
+            ),
+        )
         return PromptPreviewResponse(
-            model=request.model or settings.ollama_chat_model,
+            model=request.model or settings.ollama_generation_model,
             systemPrompt=system_prompt,
             userPrompt=user_prompt,
         )
@@ -4273,8 +4407,10 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Instruction is required.")
 
         domain_types = list_domain_types(settings)
+        source_record_id = None
         if request.parentDomainCode:
             domain_context = get_domain_assist_context(settings, request.parentDomainCode)
+            source_record_id = (domain_context.get("domain") or {}).get("DomainId")
             compiled_prompt = _build_child_domain_suggestion_prompt(
                 domain_context,
                 instruction,
@@ -4294,10 +4430,20 @@ def create_app() -> FastAPI:
             )
             compiled_prompt = f"{compiled_prompt[0]}\n\n{compiled_prompt[1]}"
             root_mode = True
+        compiled_prompt = _append_framework_context(
+            compiled_prompt,
+            _load_framework_prompt_context(
+                settings,
+                activity_type="DomainDevelopment",
+                artifact_type="Domain",
+                source_record_id=source_record_id,
+            ),
+        )
+        selected_model = request.model or settings.ollama_generation_model
         answer_payload = _generate_with_ollama(
             settings,
             compiled_prompt,
-            model=request.model,
+            model=selected_model,
             trace_label="domains.child-suggest",
         )
         raw_answer = str(answer_payload.get("response", "")).strip()
@@ -4345,7 +4491,7 @@ def create_app() -> FastAPI:
             },
             "sqlPreview": sql_preview,
             "systemPromptLabel": "Child domain suggestion assist",
-            "metrics": _extract_metrics(answer_payload, model=request.model),
+            "metrics": _extract_metrics(answer_payload, model=selected_model),
         }
 
     @app.post("/domains/suggest-child-preview")
@@ -4355,8 +4501,10 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Instruction is required.")
 
         domain_types = list_domain_types(settings)
+        source_record_id = None
         if request.parentDomainCode:
             domain_context = get_domain_assist_context(settings, request.parentDomainCode)
+            source_record_id = (domain_context.get("domain") or {}).get("DomainId")
             system_prompt, user_prompt = _build_child_domain_suggestion_prompt_parts(
                 domain_context,
                 instruction,
@@ -4373,8 +4521,17 @@ def create_app() -> FastAPI:
                 domain_types,
                 list_domains(settings),
             )
+        system_prompt = _append_framework_context(
+            system_prompt,
+            _load_framework_prompt_context(
+                settings,
+                activity_type="DomainDevelopment",
+                artifact_type="Domain",
+                source_record_id=source_record_id,
+            ),
+        )
         return PromptPreviewResponse(
-            model=request.model or settings.ollama_chat_model,
+            model=request.model or settings.ollama_generation_model,
             systemPrompt=system_prompt,
             userPrompt=user_prompt,
         )

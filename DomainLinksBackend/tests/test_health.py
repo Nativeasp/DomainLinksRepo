@@ -18,6 +18,7 @@ def test_config_returns_public_settings() -> None:
 
     assert response.status_code == 200
     assert response.json()["default_llm_provider"] == "ollama"
+    assert response.json()["ollama_generation_model"] == "qwen3.5:35b-mlx"
 
 
 def test_domains_endpoint_returns_list() -> None:

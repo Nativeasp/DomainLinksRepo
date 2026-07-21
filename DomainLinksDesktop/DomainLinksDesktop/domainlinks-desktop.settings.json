@@ -2,6 +2,7 @@
   "BackendBaseUrl": "http://127.0.0.1:5056",
   "OllamaBaseUrl": "http://10.211.55.2:11434",
   "OcrModel": "glm-ocr:bf16",
+  "ContentGenerationModel": "qwen3.5:35b-mlx",
   "AutoStartLocalBackend": true,
   "BackendRelativeWorkingDirectory": "DomainLinksBackend",
   "BackendPythonExecutable": ".venv\\Scripts\\python.exe",

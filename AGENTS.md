@@ -2,6 +2,8 @@
 
 Use concise, practical output.
 
+Use `C:\SQLDatabases\Backups` as the standard destination for all SQL Server database backups. Include the database name and a date-time stamp in each backup filename.
+
 Use the repo skill at `.codex/skills/git-commit-push` when the user asks to commit changes, write a commit message, push to GitHub, publish a branch, or sync the repo with its remote. Do not push unless the user explicitly asks.
 
 When asked to save a session summary, write the file to `chats/`.

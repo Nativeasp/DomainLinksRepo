@@ -1,6 +1,6 @@
 # DomainLinks Current Technology Stack
 
-Last reviewed: 2026-07-18
+Last reviewed: 2026-07-21
 
 This document describes the technology that is implemented or configured in the current DomainLinks repository. Machine-specific addresses reflect the checked-in development configuration and are not portable defaults.
 
@@ -51,13 +51,15 @@ The backend connects to SQL Server `RICHARDBASQB378`, database `DomainLinks`, us
 
 SQL Server stores:
 
+- Application entity keys as `INT IDENTITY(1,1)` values with matching `INT` foreign keys; APIs serialize these IDs as strings for desktop compatibility.
 - Domain taxonomy, hierarchy, clusters, collections, orientations, and workspace-memory scopes.
 - Documents and extracted content units.
 - Embedding profiles and 768-dimensional content embeddings in the native `VECTOR(768)` type.
-- Canonical semantic artifacts and 768-dimensional embeddings for domains, controls, policies, and policy statements.
+- Canonical semantic artifacts and 768-dimensional embeddings for domains, controls, policies, policy statements, principles, and framework elements.
 - Retrieval profiles and provider settings.
 - Controls, control types, domain-to-control assignments, and ordering metadata.
 - Policy templates, policies, structured policy sections and statements, principles, relations, and linked control statements.
+- Versioned organizational frameworks, immutable foundational principles, element relationships, contextual rules, and instrument links.
 - Application users and encrypted chat-backup payload metadata.
 - Schema migration history.
 
@@ -79,13 +81,14 @@ This is the primary local chat history store; it is not SQLite. `ChatBackupServi
 
 | Function | Current default/configuration | How it is used |
 |---|---|---|
-| General chat and generation | `llama3.1:8b` backend default | Main chat, policy/control assistance, explanations, and other generated text; the desktop can select another installed Ollama model |
+| General chat | `llama3.1:8b` backend default | Main chat; the desktop can select another installed Ollama model |
+| Organizational content generation | `qwen3.5:35b-mlx` | Domain, control, and policy assistance, drafting, grouping, and explanations |
 | Chat-title generation | `llama3.1:8b` | Produces concise titles for new chats |
 | Embeddings | `nomic-embed-text:v1.5` | Generates 768-dimensional embeddings for content units and retrieval queries |
 | OCR/vision | `glm-ocr:bf16` desktop default | Extracts text from PDFs and supported images through Ollama's generation API |
 | Alternate OCR | `deepseek-ocr:3b` | Offered by the OCR viewer as another suggested installed model |
 
-The desktop discovers locally installed models through Ollama's `/api/tags` endpoint and remembers the last selected chat model. The backend uses Ollama's `/api/generate`, `/api/embed`, and legacy `/api/embeddings` endpoints as appropriate. Model values are configuration, not hard platform dependencies, except that stored embeddings must match the configured embedding profile and vector dimension.
+The desktop discovers locally installed models through Ollama's `/api/tags` endpoint and remembers the last selected chat model. Content generation uses its own configurable model so chat selection cannot accidentally downgrade policy, control, or domain drafting. The backend uses Ollama's `/api/generate`, `/api/embed`, and legacy `/api/embeddings` endpoints as appropriate. Model values are configuration, not hard platform dependencies, except that stored embeddings must match the configured embedding profile and vector dimension.
 
 DomainLinks also uses Windows Runtime PDF rendering and Windows OCR in PowerShell document-extraction helpers. This path is separate from the standalone Ollama OCR viewer.
 
@@ -102,10 +105,10 @@ DomainLinks also uses Windows Runtime PDF rendering and Windows OCR in PowerShel
 
 ### Backend service
 
-- **FastAPI routes:** expose health/configuration, domains, collections, documents, embeddings, retrieval, controls, policies, AI-generation, debug, and chat-backup operations.
+- **FastAPI routes:** expose health/configuration, frameworks and contextual principles, domains, collections, documents, embeddings, retrieval, controls, policies, AI-generation, debug, and chat-backup operations.
 - **Repository layer:** contains SQL statements and maps database rows to API response shapes.
 - **Document ingestion:** validates uploads, extracts PDF text, splits content into units, and coordinates persistence and embedding generation.
-- **Retrieval and prompt assembly:** selects full document/domain context and/or vector matches, applies prompt budgets, and calls Ollama.
+- **Retrieval and prompt assembly:** selects authoritative framework principles, full document/domain context, and/or vector matches, applies prompt budgets, and calls Ollama.
 - **Streaming and diagnostics:** streams model output and records request traces used by local debug pages.
 - **Semantic embedding worker:** runs as a separate Python process, detects new or changed governance records by content hash, and incrementally maintains their vectors without blocking API requests.
 

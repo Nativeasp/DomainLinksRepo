@@ -6,10 +6,12 @@ namespace DomainLinksDesktop;
 internal sealed record DomainLinksDesktopSettings
 {
     public const string DefaultOcrModel = "glm-ocr:bf16";
+    public const string DefaultContentGenerationModel = "qwen3.5:35b-mlx";
 
     public string BackendBaseUrl { get; init; } = "http://127.0.0.1:5056";
     public string OllamaBaseUrl { get; init; } = "http://10.211.55.2:11434";
     public string OcrModel { get; init; } = DefaultOcrModel;
+    public string ContentGenerationModel { get; init; } = DefaultContentGenerationModel;
     public bool AutoStartLocalBackend { get; init; } = true;
     public string BackendRelativeWorkingDirectory { get; init; } = "DomainLinksBackend";
     public string BackendPythonExecutable { get; init; } = ".venv\\Scripts\\python.exe";
@@ -91,6 +93,7 @@ internal sealed record DomainLinksDesktopSettings
                 BackendBaseUrl = NormalizeUrl(settings.BackendBaseUrl, "http://127.0.0.1:5056"),
                 OllamaBaseUrl = NormalizeUrl(settings.OllamaBaseUrl, "http://10.211.55.2:11434"),
                 OcrModel = NormalizeText(settings.OcrModel, DefaultOcrModel),
+                ContentGenerationModel = NormalizeText(settings.ContentGenerationModel, DefaultContentGenerationModel),
                 AutoStartLocalBackend = settings.AutoStartLocalBackend,
                 BackendRelativeWorkingDirectory = NormalizePath(settings.BackendRelativeWorkingDirectory, "DomainLinksBackend"),
                 BackendPythonExecutable = NormalizePath(settings.BackendPythonExecutable, ".venv\\Scripts\\python.exe"),
@@ -163,6 +166,7 @@ internal sealed record DomainLinksDesktopSettings
             WindowLeft = FiniteOrDefault(WindowLeft, 0),
             WindowTop = FiniteOrDefault(WindowTop, 0),
             OcrModel = NormalizeText(OcrModel, DefaultOcrModel),
+            ContentGenerationModel = NormalizeText(ContentGenerationModel, DefaultContentGenerationModel),
             LeftPaneWidth = PositiveOrDefault(LeftPaneWidth, 280),
             RightPaneWidth = PositiveOrDefault(RightPaneWidth, 320),
             PromptPaneHeight = PositiveOrDefault(PromptPaneHeight, 160),

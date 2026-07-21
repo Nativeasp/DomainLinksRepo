@@ -738,9 +738,9 @@ public partial class DomainPolicyDraftTab : UserControl
             return string.Empty;
         }
 
-        return string.IsNullOrWhiteSpace(_settings.LastSelectedModel)
-            ? string.Empty
-            : _settings.LastSelectedModel.Trim();
+        return string.IsNullOrWhiteSpace(_settings.ContentGenerationModel)
+            ? DomainLinksDesktopSettings.DefaultContentGenerationModel
+            : _settings.ContentGenerationModel.Trim();
     }
 
     private async void RetryLineButton_OnClick(object sender, RoutedEventArgs e)

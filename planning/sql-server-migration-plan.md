@@ -45,7 +45,7 @@ Recommended domain types:
 
 A project acts like a domain but represents short-term memory. In SQL Server, project memories should live under a `Projects` domain/scope type rather than being modeled as unrelated folders.
 
-Collections should be identified internally by stable codes or GUIDs. Friendly names and slugs are for UI display only. This avoids brittle naming such as `projects_hire-new-dba-indexcodeorsomething` becoming part of the core identity.
+Collections should use SQL Server integer identity keys and stable unique codes. Friendly names and slugs are for UI display only. This avoids brittle naming such as `projects_hire-new-dba-indexcodeorsomething` becoming part of the core identity.
 
 During Chroma transition, SQL/VB stores should map through an abstraction layer:
 - SQL domain/project scope maps to a Chroma collection or metadata filter
