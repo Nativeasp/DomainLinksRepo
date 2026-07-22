@@ -1613,6 +1613,8 @@ def _build_domain_assist_prompt_parts(
     child_domains = domain_context.get("childDomains") or []
     collections = domain_context.get("collections") or []
     documents = domain_context.get("documents") or []
+    controls = domain_context.get("controls") or []
+    policies = domain_context.get("policies") or []
 
     child_lines = [
         f"- {item.get('displayName')} ({item.get('domainType') or 'Unknown type'})"
@@ -1626,12 +1628,33 @@ def _build_domain_assist_prompt_parts(
         f"- {item.get('SourceName')} ({item.get('SourceType') or 'unknown'}) in {item.get('CollectionDisplayName')} chunks={item.get('ChunkCount') or 0}"
         for item in documents
     ]
+    control_lines = [
+        f"- {item.get('DisplayName')} [{item.get('ControlCode')}] type={item.get('ControlTypeCode') or 'Unknown'}"
+        for item in controls
+    ]
+    policy_lines = [
+        f"- {item.get('PolicyTitle')} [{item.get('PolicyCode')}] version={item.get('VersionText') or 'Unknown'} status={item.get('Status') or 'Unknown'}"
+        for item in policies
+    ]
 
     system_prompt = (
         "You are helping curate a local RAG domain store for an internal knowledge workspace. "
         "Write concise, clear domain wording that improves retrieval usefulness. "
         "Preserve organizational meaning. Avoid generic filler and avoid marketing tone. "
         "Help distinguish the selected domain from sibling domains and describe what belongs in it. "
+        "Treat the domain description as durable business scope that will guide the later creation and evaluation of "
+        "child domains, collections, controls, policies, procedures, evidence, and organizational mandates. "
+        "When supported by the supplied context, express the domain's responsibilities, boundaries, intended outcomes, "
+        "required organizational readiness, and direction of effort in concrete business language. "
+        "Apply the Mandate-Capability-Strategy framework through the meaning of the wording; do not describe the wording "
+        "as framework-aware and do not announce that the content addresses capability, strategy, readiness, or a mandate. "
+        "Never use meta-commentary such as 'Content addresses', 'This domain supports the creation of', "
+        "'This description aligns with', or similar statements about the text itself. "
+        "Style example only—follow its structure and level of specificity, but do not copy its subject matter: "
+        "'Land stewardship, environmental protection, permitting, and monitoring within the traditional territory. "
+        "This domain establishes responsibility for managing natural resources, maintaining the people, systems, "
+        "processes, controls, and evidence needed for effective stewardship, and directing those capabilities toward "
+        "Community Infrastructure priorities and sustainable service outcomes.' "
         "Return only the suggested wording or answer requested by the user. "
         "Do not use bullet points unless the user explicitly asks for them."
     )
@@ -1644,6 +1667,8 @@ def _build_domain_assist_prompt_parts(
         f"Child domains:\n{chr(10).join(child_lines) if child_lines else 'None'}\n\n"
         f"Collections in this domain:\n{chr(10).join(collection_lines) if collection_lines else 'None'}\n\n"
         f"Recent documents in this domain:\n{chr(10).join(document_lines) if document_lines else 'None'}\n\n"
+        f"Controls in this domain:\n{chr(10).join(control_lines) if control_lines else 'None'}\n\n"
+        f"Policies rooted in this domain:\n{chr(10).join(policy_lines) if policy_lines else 'None'}\n\n"
         f"User instruction:\n{instruction.strip()}\n"
     )
     return system_prompt, user_prompt
@@ -1695,7 +1720,12 @@ def _build_child_domain_suggestion_prompt_parts(
         '- "domainType" must be exactly one of the allowed domain type codes shown below.\n'
         "- Do not repeat or closely duplicate an existing child domain.\n"
         "- Make the suggestion fit naturally under the selected parent domain.\n"
-        "- Prefer clarity and specificity over broad or generic wording."
+        "- Prefer clarity and specificity over broad or generic wording.\n"
+        "- Treat the description as durable business scope that will guide later child domains, collections, controls, policies, procedures, evidence, and mandates.\n"
+        "- Where supported, describe responsibilities, boundaries, outcomes, required organizational readiness, and direction of effort in concrete business terms.\n"
+        "- Apply Mandate, Capability, and Strategy through the substance of the description, not by naming the framework or commenting on the text.\n"
+        "- Never use meta-commentary such as 'Content addresses', 'This domain supports the creation of', 'This description aligns with', or similar wording.\n"
+        "- Style example only; follow its structure and specificity without copying its subject matter: 'Land stewardship, environmental protection, permitting, and monitoring within the traditional territory. This domain establishes responsibility for managing natural resources, maintaining the people, systems, processes, controls, and evidence needed for effective stewardship, and directing those capabilities toward Community Infrastructure priorities and sustainable service outcomes.'"
     )
     user_prompt = (
         f"Selected parent domain name: {domain.get('DisplayName') or ''}\n"
@@ -1751,7 +1781,12 @@ def _build_root_domain_suggestion_prompt_parts(
         '- "domainType" must be exactly one of the allowed domain type codes shown below.\n'
         "- Do not repeat or closely duplicate an existing top-level domain.\n"
         f"- The domainType must resolve to {domain_type_code}.\n"
-        "- Prefer clarity and specificity over broad or generic wording."
+        "- Prefer clarity and specificity over broad or generic wording.\n"
+        "- Treat the description as durable business scope that will guide later child domains, collections, controls, policies, procedures, evidence, and mandates.\n"
+        "- Where supported, describe responsibilities, boundaries, outcomes, required organizational readiness, and direction of effort in concrete business terms.\n"
+        "- Apply Mandate, Capability, and Strategy through the substance of the description, not by naming the framework or commenting on the text.\n"
+        "- Never use meta-commentary such as 'Content addresses', 'This domain supports the creation of', 'This description aligns with', or similar wording.\n"
+        "- Style example only; follow its structure and specificity without copying its subject matter: 'Land stewardship, environmental protection, permitting, and monitoring within the traditional territory. This domain establishes responsibility for managing natural resources, maintaining the people, systems, processes, controls, and evidence needed for effective stewardship, and directing those capabilities toward Community Infrastructure priorities and sustainable service outcomes.'"
     )
     user_prompt = (
         f"Selected domain type name: {domain_type_name}\n"
@@ -1829,6 +1864,9 @@ def _build_control_suggestion_prompt(
         "Assume the mandate establishes the department's purpose, authority, responsibilities, "
         "and expected outcomes. Create controls that define what must be managed, assigned, "
         "documented, evidenced, and reviewed through policy, procedure, and role requirements.\n\n"
+        "Treat domain descriptions as inherited business scope for every proposed control. "
+        "Translate capability requirements and strategic direction into concrete, auditable control objectives and evidence; "
+        "do not merely repeat framework labels or state that a control addresses the framework.\n\n"
         "Return only valid JSON in this exact structure:\n"
         "{\n"
         '  "suggestions": [\n'
@@ -2296,6 +2334,8 @@ def _build_policy_generation_prompt(
         "You are drafting an internal policy document from structured local organizational data.\n\n"
         "Rules:\n"
         "- Use only the supplied domain, child-domain, and control data.\n"
+        "- Treat domain descriptions as inherited business scope for the policy, including their boundaries, responsibilities, outcomes, readiness needs, and direction of effort.\n"
+        "- Operationalize Mandate, Capability, and Strategy in policy objectives, strategy, controls, accountability, and evidence expectations; do not merely repeat framework terminology or describe the policy as framework-aligned.\n"
         "- Do not invent external laws, standards, frameworks, departments, committees, or references.\n"
         "- Use clear professional language for workplace readers rather than legal drafting style.\n"
         "- Prefer direct sentence structure and practical wording that informed staff can grasp quickly.\n"
@@ -2393,6 +2433,8 @@ def _build_policy_content_prompt(
         "You are drafting the content sections for an internal policy from structured local organizational data.\n\n"
         "Return only valid JSON. Do not wrap it in markdown fences.\n"
         "Use only the supplied domain, branch, control, and template data.\n"
+        "Treat domain descriptions as inherited business scope for the policy, including their boundaries, responsibilities, outcomes, readiness needs, and direction of effort.\n"
+        "Operationalize Mandate, Capability, and Strategy in the policy content; do not merely repeat framework terminology or describe the text as framework-aligned.\n"
         "Do not invent external laws, standards, frameworks, departments, committees, or references.\n"
         "Treat the template as structural guidance only.\n"
         "Write concise, policy-ready sentences.\n"

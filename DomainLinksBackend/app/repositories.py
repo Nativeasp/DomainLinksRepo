@@ -820,12 +820,53 @@ def get_domain_assist_context(settings: Settings, domain_code: str) -> dict[str,
         [normalized_code],
     )
 
+    controls = fetch_all(
+        settings,
+        """
+        SELECT
+            c.ControlCode,
+            c.DisplayName,
+            c.Description,
+            c.ControlObjective,
+            ct.Code AS ControlTypeCode
+        FROM dbo.DomainControls dc
+        JOIN dbo.Domains dm
+            ON dm.DomainId = dc.DomainId
+        JOIN dbo.Controls c
+            ON c.ControlId = dc.ControlId
+        JOIN dbo.ControlTypes ct
+            ON ct.ID = c.ControlTypeId
+        WHERE dm.DomainCode = ? AND c.Status IN ('Draft', 'Active')
+        ORDER BY dc.DisplayOrder, c.DisplayName
+        """,
+        [normalized_code],
+    )
+
+    policies = fetch_all(
+        settings,
+        """
+        SELECT
+            p.PolicyCode,
+            p.PolicyTitle,
+            p.VersionText,
+            p.Status
+        FROM dbo.Policies p
+        JOIN dbo.Domains dm
+            ON dm.DomainId = p.RootDomainId
+        WHERE dm.DomainCode = ?
+        ORDER BY p.PolicyTitle, p.VersionText
+        """,
+        [normalized_code],
+    )
+
     return {
         "domain": domain,
         "parentPath": " / ".join(path_parts),
         "childDomains": [_normalize_row(row) for row in child_domains],
         "collections": [_normalize_row(row) for row in collections],
         "documents": [_normalize_row(row) for row in documents],
+        "controls": [_normalize_row(row) for row in controls],
+        "policies": [_normalize_row(row) for row in policies],
     }
 
 
